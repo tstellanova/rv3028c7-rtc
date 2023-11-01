@@ -1,9 +1,12 @@
 use linux_embedded_hal::I2cdev;
-//use embedded_hal::blocking::i2c::{Write, Read, WriteRead};
-
 use chrono::{Datelike, Timelike, Utc};
 use rv3028c7_rtc::RV3028;
 
+/**
+Example testing date and time access on RTC 
+assuming linux environment (such as Raspberry Pi 3+)
+with RV3028 attached to i2c1.
+*/
 fn main() {
 
     // Initialize the I2C device

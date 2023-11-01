@@ -1,24 +1,24 @@
 #![cfg_attr(not(test), no_std)]
 
-//#![no_std]
-
 use embedded_hal::blocking::i2c::{Write, Read, WriteRead};
 
 const RV3028_ADDRESS: u8 = 0xA4 >> 1; // 7-bit address
 
 // Register addresses
-const SECONDS: u8 = 0x00;
-const MINUTES: u8 = 0x01;
-const HOURS: u8 = 0x02;
-const STATUS_REG: u8 = 0x0E; // Status register address
-const CONTROL_1_REG: u8 = 0x1D; // Control 1 register address
-const EEBUSY_BIT: u8 = 7; // EEbusy bit in the Status register
-
+const ADDR_SECONDS: u8 = 0x00;
+const ADDR_MINUTES: u8 = 0x01;
+const ADDR_HOURS: u8 = 0x02;
 
 const ADDR_WEEKDAY: u8 = 0x03;
 const ADDR_DATE: u8 = 0x04;
 const ADDR_MONTH: u8 = 0x05;
 const ADDR_YEAR: u8 = 0x06;
+
+
+const STATUS_REG: u8 = 0x0E; // Status register address
+const CONTROL_1_REG: u8 = 0x1D; // Control 1 register address
+const EEBUSY_BIT: u8 = 7; // EEbusy bit in the Status register
+
 
 // EEPROM register addresses and commands
 pub const EEPROM_ADDRESS: u8 = 0x37;
@@ -99,16 +99,16 @@ where
 
     // Set time (hours, minutes, seconds) in binary format
     pub fn set_time(&mut self, hours: u8, minutes: u8, seconds: u8) -> Result<(), E> {
-        self.write_register(HOURS, Self::bin_to_bcd(hours))?;
-        self.write_register(MINUTES, Self::bin_to_bcd(minutes))?;
-        self.write_register(SECONDS, Self::bin_to_bcd(seconds))
+        self.write_register(ADDR_HOURS, Self::bin_to_bcd(hours))?;
+        self.write_register(ADDR_MINUTES, Self::bin_to_bcd(minutes))?;
+        self.write_register(ADDR_SECONDS, Self::bin_to_bcd(seconds))
     }
 
     // Get time in binary format
     pub fn get_time(&mut self) -> Result<(u8, u8, u8), E> {
-        let hours = Self::bcd_to_bin(self.read_register(HOURS)?);
-        let minutes = Self::bcd_to_bin(self.read_register(MINUTES)?);
-        let seconds = Self::bcd_to_bin(self.read_register(SECONDS)?);
+        let hours = Self::bcd_to_bin(self.read_register(ADDR_HOURS)?);
+        let minutes = Self::bcd_to_bin(self.read_register(ADDR_MINUTES)?);
+        let seconds = Self::bcd_to_bin(self.read_register(ADDR_SECONDS)?);
         Ok((hours, minutes, seconds))
     }
 
@@ -187,9 +187,9 @@ mod tests {
     #[test]
     fn test_set_time() {
         let expectations = [
-            I2cTrans::write(RV3028_ADDRESS, vec![HOURS, RV3028::<I2cMock>::bin_to_bcd(23)]),
-            I2cTrans::write(RV3028_ADDRESS, vec![MINUTES, RV3028::<I2cMock>::bin_to_bcd(59)]),
-            I2cTrans::write(RV3028_ADDRESS, vec![SECONDS, RV3028::<I2cMock>::bin_to_bcd(58)]),
+            I2cTrans::write(RV3028_ADDRESS, vec![ADDR_HOURS, RV3028::<I2cMock>::bin_to_bcd(23)]),
+            I2cTrans::write(RV3028_ADDRESS, vec![ADDR_MINUTES, RV3028::<I2cMock>::bin_to_bcd(59)]),
+            I2cTrans::write(RV3028_ADDRESS, vec![ADDR_SECONDS, RV3028::<I2cMock>::bin_to_bcd(58)]),
         ];
         let mock = I2cMock::new(&expectations);
         let mut rv3028 = RV3028::new(mock);
@@ -200,9 +200,9 @@ mod tests {
     #[test]
     fn test_get_time() {
         let expectations = [
-            I2cTrans::write_read(RV3028_ADDRESS, vec![HOURS], vec![0x17]),   // 23 in BCD
-            I2cTrans::write_read(RV3028_ADDRESS, vec![MINUTES], vec![0x59]), // 59 in BCD
-            I2cTrans::write_read(RV3028_ADDRESS, vec![SECONDS], vec![0x58]), // 58 in BCD
+            I2cTrans::write_read(RV3028_ADDRESS, vec![ADDR_HOURS], vec![0x17]),   // 23 in BCD
+            I2cTrans::write_read(RV3028_ADDRESS, vec![ADDR_MINUTES], vec![0x59]), // 59 in BCD
+            I2cTrans::write_read(RV3028_ADDRESS, vec![ADDR_SECONDS], vec![0x58]), // 58 in BCD
         ];
         let mock = I2cMock::new(&expectations);
         let mut rv3028 = RV3028::new(mock);
