@@ -8,9 +8,11 @@ rust no_std driver (utilizes the embedded_hal i2c interface)
 */
 use embedded_hal::blocking::i2c::{Write, Read, WriteRead};
 
-const RV3028_ADDRESS: u8 = 0xA4 >> 1; // 7-bit address
+/// i2c address of the device (7-bit)
+const RV3028_ADDRESS: u8 = 0xA4 >> 1;
 
-// Register addresses
+/// Register addresses
+
 const REG_SECONDS: u8 = 0x00;
 const REG_MINUTES: u8 = 0x01;
 const REG_HOURS: u8 = 0x02;
@@ -169,8 +171,6 @@ where
     pub fn eeprom_write(&mut self, address: u8, data: u8) -> Result<(), E> {
         self.disable_auto_eeprom_refresh()?;
         while self.is_eeprom_busy()? {}
-        // Write to EEPROM
-        // ...
         self.write_register(EEPROM_ADDRESS, address)?;
         let res = self.write_register(EEPROM_ADDRESS, data);
 
@@ -178,14 +178,14 @@ where
         res
     }
 
-    // Set time (hours, minutes, seconds) in binary format
+    /// Set time of day (hours, minutes, seconds) in binary format
     pub fn set_time(&mut self, hours: u8, minutes: u8, seconds: u8) -> Result<(), E> {
         self.write_register(REG_HOURS, Self::bin_to_bcd(hours))?;
         self.write_register(REG_MINUTES, Self::bin_to_bcd(minutes))?;
         self.write_register(REG_SECONDS, Self::bin_to_bcd(seconds))
     }
 
-    // Get time in binary format
+    /// Get time of day in binary format (hours, minutes, seconds)
     pub fn get_time(&mut self) -> Result<(u8, u8, u8), E> {
         let hours = Self::bcd_to_bin(self.read_register(REG_HOURS)?);
         let minutes = Self::bcd_to_bin(self.read_register(REG_MINUTES)?);
@@ -193,58 +193,58 @@ where
         Ok((hours, minutes, seconds))
     }
 
-        // Set the weekday
+    /// Set the weekday (day of week, 0..6)
     pub fn set_weekday(&mut self, weekday: u8) -> Result<(), E> {
         self.write_register(REG_WEEKDAY, Self::bin_to_bcd(weekday))
     }
 
-    // Get the weekday
+    /// Get the weekday (day of week, 0..6)
     pub fn get_weekday(&mut self) -> Result<u8, E> {
         let bcd = self.read_register(REG_WEEKDAY)?;
         Ok(Self::bcd_to_bin(bcd))
     }
 
-    // Year is 0..99  (2000 to 2099)
+    /// Set the calendar year, month, day. Year is 0..99  (for 2000 to 2099)
     pub fn set_year_month_day(&mut self, year: u8, month: u8, day: u8) -> Result<(), E> {
       self.write_register(REG_YEAR, Self::bin_to_bcd(year))?;
       self.write_register(REG_MONTH, Self::bin_to_bcd(month))?;
       self.write_register(REG_DATE, Self::bin_to_bcd(day))
     }
- 
 
-    // Set the date
+    /// Set the calendar date (day number of month) (1..31)
     pub fn set_date(&mut self, date: u8) -> Result<(), E> {
         self.write_register(REG_DATE, Self::bin_to_bcd(date))
     }
 
-    // Get the date
+    /// Get the calendar date (day number of month) (1..31)
     pub fn get_date(&mut self) -> Result<u8, E> {
         let bcd = self.read_register(REG_DATE)?;
         Ok(Self::bcd_to_bin(bcd))
     }
 
-    // Set the month
+    /// Set the calendar month (1..12)
     pub fn set_month(&mut self, month: u8) -> Result<(), E> {
         self.write_register(REG_MONTH, Self::bin_to_bcd(month))
     }
 
-    // Get the month
+    /// Get the calendar month (1..12)
     pub fn get_month(&mut self) -> Result<u8, E> {
         let bcd = self.read_register(REG_MONTH)?;
         Ok(Self::bcd_to_bin(bcd))
     }
 
-    // Set the year
+    /// Set the calendar year (1..12)
     pub fn set_year(&mut self, year: u8) -> Result<(), E> {
         self.write_register(REG_YEAR, Self::bin_to_bcd(year))
     }
 
-    // Get the year
+    /// Get the calendar year (00..99 for 2000..2099)
     pub fn get_year(&mut self) -> Result<u8, E> {
         let bcd = self.read_register(REG_YEAR)?;
         Ok(Self::bcd_to_bin(bcd))
     }
 
+    /// Set the calendar year, month, day
     pub fn get_year_month_day(&mut self) -> Result<(u8, u8, u8), E> {
 	let year = self.get_year()?;
         let month = self.get_month()?;
@@ -252,41 +252,52 @@ where
         Ok((year,month,day))
     }
 
-
-    // Set the minutes for the alarm
+    /**
+    Set the minutes for the alarm
+    */
     pub fn set_alarm_minutes(&mut self, minutes: u8) -> Result<(), E> {
         let bcd_minutes = Self::bin_to_bcd(minutes);
         self.write_register( REG_MINUTES_ALARM , bcd_minutes)
     }
 
-    // Get the minutes for the alarm
+    /**
+    Get the minutes for the alarm
+    */
     pub fn get_alarm_minutes(&mut self) -> Result<u8, E> {
         let bcd_minutes = self.read_register(REG_MINUTES_ALARM)?;
         Ok(Self::bcd_to_bin(bcd_minutes))
     }
 
-    // Set the hours for the alarm
+    /**
+    Set the hours for the alarm
+    */
     pub fn set_alarm_hours(&mut self, hours: u8) -> Result<(), E> {
         let bcd_hours = Self::bin_to_bcd(hours);
         self.write_register(REG_HOURS_ALARM , bcd_hours)
     }
 
-    // Get the hours for the alarm
+    /**
+    Get the hours for the alarm
+    */
     pub fn get_alarm_hours(&mut self) -> Result<u8, E> {
         let bcd_hours = self.read_register(REG_HOURS_ALARM)?;
         Ok(Self::bcd_to_bin(bcd_hours))
     }
 
-    // Set the weekday/date for the alarm
-    // `is_weekday`: true for weekday, false for date
+    /**
+    Set the weekday/date for the alarm
+    - `is_weekday` is true for weekday, false for date
+    */
     pub fn set_alarm_weekday_date(&mut self, value: u8, is_weekday: bool) -> Result<(), E> {
         let bcd_value = Self::bin_to_bcd(value);
         let alarm_value = if is_weekday { bcd_value } else { bcd_value | 0x40 };
         self.write_register(REG_WEEKDAY_DATE_ALARM , alarm_value)
     }
 
-    // Get the weekday/date for the alarm
-    // Returns (value, is_weekday): `is_weekday` is true if the alarm is set for a weekday
+    /**
+    Get the weekday/date for the alarm
+    - Returns (value, is_weekday): `is_weekday` is true if the alarm is set for a weekday
+    */
     pub fn get_alarm_weekday_date(&mut self) -> Result<(u8, bool), E> {
         let alarm_value = self.read_register(REG_WEEKDAY_DATE_ALARM)?;
         let is_weekday = (alarm_value & 0x40) == 0;
@@ -301,14 +312,13 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    // use embedded_hal_mock::i2c::{Mock as I2cMock, Transaction as I2cTrans};
-    use embedded_hal_mock::{
-        i2c::{Mock as I2cMock, Transaction as I2cTrans},
-        MockError,
-    };
-     use std::vec;
+    use embedded_hal_mock::i2c::{Mock as I2cMock, Transaction as I2cTrans};
+    // use embedded_hal_mock::{
+    //     i2c::{Mock as I2cMock, Transaction as I2cTrans},
+    //     // MockError,
+    // };
+    use std::vec;
 
-    // Test setting time
     #[test]
     fn test_set_time() {
         let expectations = [
@@ -321,13 +331,12 @@ mod tests {
         rv3028.set_time(23, 59, 58).unwrap();
     }
 
-    // Test getting time
     #[test]
     fn test_get_time() {
         let expectations = [
-            I2cTrans::write_read(RV3028_ADDRESS, vec![REG_HOURS], vec![0x17]),   // 23 in BCD
-            I2cTrans::write_read(RV3028_ADDRESS, vec![REG_MINUTES], vec![0x59]), // 59 in BCD
-            I2cTrans::write_read(RV3028_ADDRESS, vec![REG_SECONDS], vec![0x58]), // 58 in BCD
+            I2cTrans::write_read(RV3028_ADDRESS, vec![REG_HOURS], vec![RV3028::<I2cMock>::bin_to_bcd(23)]),
+            I2cTrans::write_read(RV3028_ADDRESS, vec![REG_MINUTES], vec![RV3028::<I2cMock>::bin_to_bcd(59)]),
+            I2cTrans::write_read(RV3028_ADDRESS, vec![REG_SECONDS], vec![RV3028::<I2cMock>::bin_to_bcd(58)]),
         ];
         let mock = I2cMock::new(&expectations);
         let mut rv3028 = RV3028::new(mock);
@@ -337,10 +346,9 @@ mod tests {
         assert_eq!(seconds, 58);
     }
 
-
     #[test]
     fn test_set_alarm_minutes() {
-        let expectations = [I2cTrans::write(RV3028_ADDRESS, vec![ REG_MINUTES_ALARM, 0x15])];
+        let expectations = [I2cTrans::write(RV3028_ADDRESS, vec![ REG_MINUTES_ALARM, RV3028::<I2cMock>::bin_to_bcd(15)])];
         let mock = I2cMock::new(&expectations);
         let mut rv3028 = RV3028::new(mock);
         rv3028.set_alarm_minutes(15).unwrap();
@@ -349,25 +357,48 @@ mod tests {
     #[test]
     fn test_get_alarm_minutes() {
         let expectations = [
-            I2cTrans::write_read(RV3028_ADDRESS, vec![REG_MINUTES_ALARM], vec![0x15]),
+            I2cTrans::write_read(RV3028_ADDRESS, vec![REG_MINUTES_ALARM], vec![RV3028::<I2cMock>::bin_to_bcd(15)]),
         ];
         let mock = I2cMock::new(&expectations);
         let mut rv3028 = RV3028::new(mock);
         assert_eq!(rv3028.get_alarm_minutes().unwrap(), 15);
     }
 
-    // ... similar tests for set_alarm_hours, get_alarm_hours, set_alarm_weekday_date, get_alarm_weekday_date
+    //TODO similar tests for set_alarm_hours, get_alarm_hours, get_alarm_weekday_date
 
     #[test]
     fn test_set_alarm_weekday_date() {
-        let expectations = [I2cTrans::write(RV3028_ADDRESS, vec![REG_WEEKDAY_DATE_ALARM, 0x02])];
+        let expectations = [I2cTrans::write(RV3028_ADDRESS, vec![REG_WEEKDAY_DATE_ALARM, RV3028::<I2cMock>::bin_to_bcd(2)])];
         let mock = I2cMock::new(&expectations);
         let mut rv3028 = RV3028::new(mock);
         rv3028.set_alarm_weekday_date(2, true).unwrap();
     }
 
+    #[test]
+    fn test_set_year_month_day() {
+        let expectations = [
+            I2cTrans::write(RV3028_ADDRESS, vec![REG_YEAR, RV3028::<I2cMock>::bin_to_bcd(23)]),
+            I2cTrans::write(RV3028_ADDRESS, vec![REG_MONTH, RV3028::<I2cMock>::bin_to_bcd(12)]),
+            I2cTrans::write(RV3028_ADDRESS, vec![REG_DATE, RV3028::<I2cMock>::bin_to_bcd(31)]),
+        ];
+        let mock = I2cMock::new(&expectations);
+        let mut rv3028 = RV3028::new(mock);
+        rv3028.set_year_month_day(23, 12, 31).unwrap();
+    }
+
+    #[test]
+    fn test_get_year_month_day() {
+        let expectations = [
+            I2cTrans::write_read(RV3028_ADDRESS, vec![REG_YEAR], vec![RV3028::<I2cMock>::bin_to_bcd(23)]),
+            I2cTrans::write_read(RV3028_ADDRESS, vec![REG_MONTH], vec![RV3028::<I2cMock>::bin_to_bcd(12)]),
+            I2cTrans::write_read(RV3028_ADDRESS, vec![REG_DATE], vec![RV3028::<I2cMock>::bin_to_bcd(31)]),
+        ];
+        let mock = I2cMock::new(&expectations);
+        let mut rv3028 = RV3028::new(mock);
+        let (year, month, day) = rv3028.get_year_month_day().unwrap();
+        assert_eq!(year, 23);
+        assert_eq!(month, 12);
+        assert_eq!(day, 31);
+    }
 }
-
-
-
 
