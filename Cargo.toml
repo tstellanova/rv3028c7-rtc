@@ -4,9 +4,11 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Todd Stellanova <tstellanova@users.noreply.github.com>"]
 license = "BSD-3-Clause"
-repository = "https://github.com/tstellanova/rv3028c7-rtc/"
+repository = "https://github.com/tstellanova/rv3028c7-rtc"
 description = "RV-3028-C7 and similar Real Time Clock (RTC) no_std driver"
 readme = "README.md"
+keywords = ["no-std", "driver", "embedded-hal", "i2c", "rtc"]
+categories = ["embedded", "hardware-support", "no-std"]
 
 [dependencies]
 embedded-hal = "0.2.7"

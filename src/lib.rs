@@ -93,12 +93,12 @@ This register is used to control:
 - interrupt controlled clock output on CLKOUT pin
 - hour mode and time stamp enable
 */
-const REG_CONTROL2:u8 = 0x10;
+// const REG_CONTROL2:u8 = 0x10;
 
 // Control1 register bits:
 const EERD_BIT: u8 = 1 << 3;
-const USEL_BIT: u8 = 1 << 4;
-const WADA_BIT: u8 = 1 << 5;
+// const USEL_BIT: u8 = 1 << 4;
+// const WADA_BIT: u8 = 1 << 5;
 
 // Status register bits:
 const EEBUSY_BIT: u8 = 1 << 7;
