@@ -34,6 +34,11 @@ fn get_sys_date_time() -> (i64, u8, u8, u8, u8, u8, u8)
     (now_timestamp, now_year, now_month, now_date, now_hour, now_minute, now_second)
 }
 
+fn get_sys_timestamp() -> u32 {
+    let now = Utc::now();
+    let now_timestamp = now.timestamp();
+    now_timestamp.try_into().unwrap()
+}
 
 fn main() {
 
@@ -44,6 +49,15 @@ fn main() {
     // Create a new instance of the RV3028 driver
     let mut rtc = RV3028::new(i2c);
 
+    // Pull the current system time and synchronize RTC time to that
+    let (_now_timestamp, now_year, now_month, now_date, now_hour, now_minute, now_second) =
+        get_sys_date_time();
+    let input_unix_time: u32 = get_sys_timestamp();
+    rtc.set_unix_time(input_unix_time).expect("couldn't set unix time");
+    let output_unix_time = rtc.get_unix_time().expect("couldn't get unix time");
+    println!("unix timestamp in: {} out: {}", input_unix_time, output_unix_time);
+
+    println!("sys date: {}-{:02}-{:02}", (2000u32 + now_year as u32), now_month, now_date);
     let (year, month, day) = rtc.get_year_month_day()
         .expect("Failed to get date");
     println!("rtc date: {}-{:02}-{:02}", (2000u32 + year as u32), month, day);
@@ -51,30 +65,16 @@ fn main() {
     let (hours, minutes, seconds) = rtc.get_time()
         .expect("Failed to get time");
     println!("rtc time: {:02}:{:02}:{:02}", hours, minutes, seconds);
+    println!("sys time: {:02}:{:02}:{:02}", now_hour, now_minute, now_second);
 
-    // Pull the current system time
-    let (_now_timestamp, now_year, now_month, now_date, now_hour, now_minute, now_second) =
-        get_sys_date_time();
-
-    // Set the RTC time and date based on system time
-    rtc.set_year_month_day( now_year, now_month, now_date).expect("Failed to set date");
-    rtc.set_time(now_hour, now_minute, now_second).expect("Failed to set time");
 
     // check the drift over and over again
     loop {
-        let (hours, minutes, seconds) = rtc.get_time().expect("Failed to get time");
-        let (year, month, date) = rtc.get_year_month_day().expect("Failed to get date");
-        let (now_timestamp, now_year, now_month, now_date, now_hour, now_minute, now_second) =
-            get_sys_date_time();
-        println!("{}, {}-{:02}-{:02}, {:02}:{:02}:{:02}",
-                 now_timestamp,
-                 now_year - year, now_month - month, now_date - date,
-                 now_hour - hours, now_minute - minutes, now_second - seconds);
-
+        let rtc_unix_time = rtc.get_unix_time().expect("couldn't get unix time");
+        let sys_unix_timestamp = get_sys_timestamp();
+        println!("{}, {}", sys_unix_timestamp, rtc_unix_time);
         sleep(Duration::from_secs(60));
     }
 
 
 }
-
-

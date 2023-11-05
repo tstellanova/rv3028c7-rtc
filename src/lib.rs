@@ -95,6 +95,12 @@ This register is used to control:
 */
 // const REG_CONTROL2:u8 = 0x10;
 
+/// First address of "Unix Time Counter"
+const REG_UNIX_TIME_0: u8 = 0x1B;
+// const REG_UNIX_TIME_1: u8 = 0x1C;
+// const REG_UNIX_TIME_2: u8 = 0x1D;
+// const REG_UNIX_TIME_3: u8 = 0x1E;
+
 // Control1 register bits:
 const EERD_BIT: u8 = 1 << 3;
 // const USEL_BIT: u8 = 1 << 4;
@@ -305,8 +311,33 @@ where
         Ok((Self::bcd_to_bin(value), is_weekday))
     }
 
+    /// Set the Unix time counter
+    pub fn set_unix_time(&mut self, unix_time: u32) -> Result<(), E> {
+        let bytes = unix_time.to_le_bytes(); // Convert to little-endian byte array
+        self.i2c.write(RV3028_ADDRESS, &[REG_UNIX_TIME_0, bytes[0], bytes[1], bytes[2], bytes[3]])
+    }
 
-    // Add more methods for other functionalities...
+    /// Read the Unix time counter
+    pub fn get_unix_time(&mut self) -> Result<u32, E> {
+        loop {
+            // per the vendor application notes, we should read twice and get the same result
+            let mut first_read = [0u8; 4];
+            let mut second_read = [0u8; 4];
+
+            // First read
+            self.i2c.write_read(RV3028_ADDRESS, &[REG_UNIX_TIME_0], &mut first_read)?;
+            // Second read for consistency check
+            self.i2c.write_read(RV3028_ADDRESS, &[REG_UNIX_TIME_0], &mut second_read)?;
+
+            let val1 = u32::from_le_bytes(first_read);
+            let val2 = u32::from_le_bytes(second_read);
+            if val1 == val2 {
+                return Ok(val2)
+            }
+        }
+    }
+
+    // TODO more methods for other functions...
 }
 
 #[cfg(test)]
@@ -382,19 +413,50 @@ mod tests {
         rv3028.set_year_month_day(23, 12, 31).unwrap();
     }
 
+
     #[test]
-    fn test_get_year_month_day() {
+    fn test_set_unix_time() {
+        let unix_time: u32 = 1_614_456_789; // Example Unix time
+        let bytes = unix_time.to_le_bytes(); // Convert to little-endian byte array
         let expectations = [
-            I2cTrans::write_read(RV3028_ADDRESS, vec![REG_YEAR], vec![RV3028::<I2cMock>::bin_to_bcd(23)]),
-            I2cTrans::write_read(RV3028_ADDRESS, vec![REG_MONTH], vec![RV3028::<I2cMock>::bin_to_bcd(12)]),
-            I2cTrans::write_read(RV3028_ADDRESS, vec![REG_DATE], vec![RV3028::<I2cMock>::bin_to_bcd(31)]),
+            I2cTrans::write(
+                RV3028_ADDRESS,
+                vec![
+                    REG_UNIX_TIME_0,
+                    bytes[0],
+                    bytes[1],
+                    bytes[2],
+                    bytes[3],
+                ],
+            ),
         ];
         let mock = I2cMock::new(&expectations);
         let mut rv3028 = RV3028::new(mock);
-        let (year, month, day) = rv3028.get_year_month_day().unwrap();
-        assert_eq!(year, 23);
-        assert_eq!(month, 12);
-        assert_eq!(day, 31);
+        rv3028.set_unix_time(unix_time).unwrap();
     }
+
+    #[test]
+    fn test_get_unix_time() {
+        let unix_time: u32 = 1_614_456_789; // Example Unix time
+        let bytes = unix_time.to_le_bytes(); // Convert to little-endian byte array
+        let expectations = [
+            I2cTrans::write_read(
+                RV3028_ADDRESS,
+                vec![REG_UNIX_TIME_0],
+                bytes.to_vec(),
+            ),
+            I2cTrans::write_read(
+                RV3028_ADDRESS,
+                vec![REG_UNIX_TIME_0],
+                bytes.to_vec(),
+            ),
+        ];
+        let mock = I2cMock::new(&expectations);
+        let mut rv3028 = RV3028::new(mock);
+        assert_eq!(rv3028.get_unix_time().unwrap(), unix_time);
+    }
+
+
+
 }
 
