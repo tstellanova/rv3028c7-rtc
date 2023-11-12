@@ -11,8 +11,10 @@ but it does not exercise all the features of the RTC.
 
 ## Running examples
 
-- `rpil` demonstrates some basic interactions with the RTC, using a Raspberry Pi platform. 
+- [`rpil`](./examples/rpil.rs) demonstrates some basic interactions with the RTC, using a Raspberry Pi platform. 
 This can be run with `cargo run --example rpil` from the linux command line.
+- [`muxit`](./examples/muxit.rs) demonstrates talking to two RTCs (with the same i2c address) via a TCA9548A-like i2c mux. See the [high-level wiring diagram schematic](./res/dual-rtc-schematic.pdf).
+
 
 
 ## Testing

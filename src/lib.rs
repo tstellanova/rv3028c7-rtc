@@ -117,6 +117,8 @@ pub const EEPROM_CMD_WRITE: u8 = 0x01;
 
 pub struct RV3028<I2C> {
     i2c: I2C,
+    mux_addr: u8,
+    mux_chan: u8,
 }
 
 impl<I2C, E> RV3028<I2C>
@@ -124,7 +126,19 @@ where
     I2C: Write<Error = E> + Read<Error = E> + WriteRead<Error = E>,
 {
     pub fn new(i2c: I2C) -> Self {
-        RV3028 { i2c }
+        RV3028 {
+            i2c,
+            mux_addr: 0u8,
+            mux_chan: 0u8
+        }
+    }
+
+    pub fn new_with_mux(i2c: I2C, mux_addr: u8, mux_chan: u8) -> Self {
+        RV3028 {
+            i2c,
+            mux_addr,
+            mux_chan
+        }
     }
 
     /// Converts a binary value to BCD format
@@ -137,11 +151,22 @@ where
         ((value & 0xF0) >> 4) * 10 + (value & 0x0F)
     }
 
+    fn select_mux_channel(&mut self) -> Result<(), E> {
+        if self.mux_addr != 0u8 {
+            self.i2c.write(self.mux_addr, &[self.mux_chan])
+        }
+        else {
+            Ok(())
+        }
+    }
+
     fn write_register(&mut self, reg: u8, data: u8) -> Result<(), E> {
+        self.select_mux_channel()?;
         self.i2c.write(RV3028_ADDRESS, &[reg, data])
     }
 
     fn read_register(&mut self, reg: u8) -> Result<u8, E> {
+        self.select_mux_channel()?;
         let mut buf = [0];
         self.i2c.write_read(RV3028_ADDRESS, &[reg], &mut buf)?;
         Ok(buf[0])
@@ -313,12 +338,14 @@ where
 
     /// Set the Unix time counter
     pub fn set_unix_time(&mut self, unix_time: u32) -> Result<(), E> {
+        self.select_mux_channel()?;
         let bytes = unix_time.to_le_bytes(); // Convert to little-endian byte array
         self.i2c.write(RV3028_ADDRESS, &[REG_UNIX_TIME_0, bytes[0], bytes[1], bytes[2], bytes[3]])
     }
 
     /// Read the Unix time counter
     pub fn get_unix_time(&mut self) -> Result<u32, E> {
+        self.select_mux_channel()?;
         loop {
             // per the vendor application notes, we should read twice and get the same result
             let mut first_read = [0u8; 4];
