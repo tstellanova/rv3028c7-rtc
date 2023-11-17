@@ -70,8 +70,8 @@ fn main() {
     rtc1.set_unix_time(next_timestamp).expect("couldn't set rtc1");
     rtc2.set_unix_time(next_timestamp).expect("couldn't set rtc2");
 
-    let (sys_timestamp, subsec) = get_sys_timestamp_and_micros();
-    println!("set time {} at {} {}", next_timestamp, sys_timestamp, subsec );
+    let (sys_timestamp_start, subsec) = get_sys_timestamp_and_micros();
+    println!("set time {} at {} + {} us", next_timestamp, sys_timestamp_start, subsec );
 
     // check the drift over and over again
     loop {
@@ -84,14 +84,16 @@ fn main() {
         let fall_back =
             Duration::from_micros(subsec.into());
         let wait_duration =
-            Duration::from_secs(1).checked_sub(fall_back).unwrap();
+            Duration::from_secs(60).checked_sub(fall_back).unwrap();
 
-        if sys_timestamp != out2 {
+        if sys_timestamp != out1 || sys_timestamp != out2 {
             println!("sys: {} rtc1: {} rtc2: {} subsec: {}",
             sys_timestamp,
             out1,
             out2,
             subsec);
+            println!("time to drift: {}", sys_timestamp - sys_timestamp_start);
+            break;
         }
         sleep(wait_duration);
     }
