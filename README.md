@@ -11,9 +11,18 @@ but it does not exercise all the features of the RTC.
 
 ## Running examples
 
-- [`rpil`](./examples/rpil.rs) demonstrates some basic interactions with the RTC, using a Raspberry Pi platform. 
-This can be run with `cargo run --example rpil` from the linux command line.
-- [`muxit`](./examples/muxit.rs) demonstrates talking to two RTCs (with the same i2c address) via a TCA9548A-like i2c mux. See the [high-level wiring diagram schematic](./res/dual-rtc-schematic.pdf).
+Currently all of the examples have been run and tested on a raspberry pi running linux, for example:
+```
+cargo run --example rpil
+ ```
+from the linux command line.
+
+- [`rpil`](./examples/rpil.rs) demonstrates some basic interactions with the RTC.
+- [`muxit`](./examples/muxit.rs) demonstrates talking to two RTCs (with the same i2c address) via a TCA9548A-like i2c mux. 
+See the [high-level wiring diagram schematic](./res/dual-rtc-schematic.pdf).
+- [`comp`](./examples/comp.rs) compares the output of four independent RTCs (two each of RV-3028-C7 and DS3231)
+and detects when they drift apart (usually after multiple days).
+See the associated [quad RTC wiring diagram](./res/comp-quad-rtc-mux.pdf).
 
 
 
@@ -27,3 +36,7 @@ You can use the following to only build tests:
 cargo test --tests
 ```
 
+## Funstuff
+
+Here's a breadboard with four RTCs connected via an i2c mux (for the RTC [comparison example](./examples/comp.rs))
+![](./res/quad-rtc-drift.jpg)

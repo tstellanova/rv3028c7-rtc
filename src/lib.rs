@@ -1,5 +1,10 @@
 #![cfg_attr(not(test), no_std)]
 
+
+pub use rtcc::{
+    DateTimeAccess, NaiveDateTime
+};
+
 /**
 RV-3028-C7
 Extreme Low Power Real-Time Clock (RTC) Module with I2C-Bus Interface
@@ -209,6 +214,27 @@ where
         res
     }
 
+    pub fn disable_trickle_charge(&mut self) -> Result<(), E> {
+        self.mask_reg_bits(EEPROM_ADDRESS,         0b1110_1111u8)
+    }
+    pub fn enable_trickle_charge(&mut self) -> Result<(), E> {
+        self.enable_reg_bits(EEPROM_ADDRESS,         0b0001_0000u8)
+    }
+
+    /// Apply a mask to the register's bits
+    fn mask_reg_bits(&mut self, reg: u8, reg_mask: u8) -> Result<(), E> {
+        let mut val = self.read_register(reg)?;
+        val &=  reg_mask;
+        self.write_register(reg, val)
+    }
+
+    /// OR bits in register
+    fn enable_reg_bits(&mut self, reg: u8, reg_bits: u8) -> Result<(), E> {
+        let mut val = self.read_register(reg)?;
+        val |=  reg_bits;
+        self.write_register(reg, val)
+    }
+
     /// Set time of day (hours, minutes, seconds) in binary format
     pub fn set_time(&mut self, hours: u8, minutes: u8, seconds: u8) -> Result<(), E> {
         self.write_register(REG_HOURS, Self::bin_to_bcd(hours))?;
@@ -364,7 +390,31 @@ where
         }
     }
 
-    // TODO more methods for other functions...
+}
+
+impl<I2C, E> DateTimeAccess for  RV3028<I2C>
+    where
+      I2C: Write<Error = E> + Read<Error = E> + WriteRead<Error = E>
+{
+    type Error = E;
+
+    fn datetime(&mut self) -> Result<NaiveDateTime, Self::Error> {
+        // this particular RTC's timestamps wrap at 0xFFFF_FFFF,
+        // it doesn't support years prior to 1970
+        // it doesn't support  leap year calculations past 2099
+        let unix_timestamp = self.get_unix_time()?;
+        Ok(NaiveDateTime::from_timestamp_opt(unix_timestamp.into(), 0).unwrap())
+    }
+
+    fn set_datetime(&mut self, datetime: &NaiveDateTime) -> Result<(), Self::Error> {
+        // This implementation assumes that we're only setting the RTC datetime to
+        // values in its range (from 1970 to 2099).
+        // Values beyond 2099 might set OK but the RTC doesn't support
+        // leap calculations beyond 2099.
+        let unix_timestamp: u32 = datetime.timestamp().try_into().unwrap();
+        self.set_unix_time(unix_timestamp)
+    }
+
 }
 
 #[cfg(test)]
