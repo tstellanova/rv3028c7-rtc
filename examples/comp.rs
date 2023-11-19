@@ -90,12 +90,12 @@ fn main() {
     // check the drift over and over again
     loop {
         let (sys_timestamp,  subsec) = get_sys_timestamp_and_micros();
-        let out1:i64 = rtc1.get_unix_time().expect("couldn't get unix time").into();
-        let out2:i64 = rtc2.get_unix_time().expect("couldn't get unix time").into();
+        let out1:i64 = rtc1.get_unix_time().expect("couldn't get RV unix time").into();
+        let out2:i64 = rtc2.get_unix_time().expect("couldn't get RV unix time").into();
         muxdev.write(MUX_I2C_ADDRESS, &[MUX_CHAN_TWO]).expect("mux ch2 i2c err");
-        let dsout1 = dsrtc1.datetime().expect("couldn't access DS RTC1").timestamp();
+        let dsout1 = dsrtc1.datetime().expect("couldn't get DS datetime ").timestamp();
         muxdev.write(MUX_I2C_ADDRESS, &[MUX_CHAN_FOUR]).expect("mux ch4 i2c err");
-        let dsout2 = dsrtc2.datetime().expect("couldn't access DS RTC1").timestamp();
+        let dsout2 = dsrtc2.datetime().expect("couldn't get DS datetime").timestamp();
 
         // adjust the check time so that we're checking as fast as we
         // can just after one second has elapsed
