@@ -48,7 +48,6 @@ fn main() {
 
     // Create a new instance of the RV3028 driver
     let mut rtc = RV3028::new(i2c);
-    rtc.disable_trickle_charge().expect("unable to disable_trickle_charge");
 
     // Pull the current system time and synchronize RTC time to that
     let (_now_timestamp, now_year, now_month, now_date, now_hour, now_minute, now_second) =

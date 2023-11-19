@@ -1,13 +1,12 @@
 extern crate rv3028c7_rtc;
 
-use std::convert::TryInto;
+use core::convert::TryInto;
 use linux_embedded_hal::I2cdev;
-use chrono::{ Utc};
+use chrono::{Utc};
 use rv3028c7_rtc::RV3028;
 use std::time::{Duration };
 use std::thread::sleep;
-use ds323x::{DateTimeAccess, Ds323x  };
-use embedded_hal::blocking::i2c::Write;
+use ds323x::Ds323x;
 
 
 
@@ -52,65 +51,75 @@ fn main() {
     let i2c = I2cdev::new("/dev/i2c-1").expect("Failed to open I2C device");
     let i2c_bus = shared_bus::BusManagerSimple::new(i2c);
 
-    // Create two instances of the RV3028 driver
-    let mut rtc1 = RV3028::new_with_mux(i2c_bus.acquire_i2c(), MUX_I2C_ADDRESS, MUX_CHAN_ZERO);
-    rtc1.disable_trickle_charge().expect("unable to disable_trickle_charge");
-    let mut rtc2 = RV3028::new_with_mux(i2c_bus.acquire_i2c(), MUX_I2C_ADDRESS, MUX_CHAN_SEVEN);
-    rtc2.disable_trickle_charge().expect("unable to disable_trickle_charge");
-
-    let mut dsrtc1 = Ds323x::new_ds3231(i2c_bus.acquire_i2c());
-    let mut dsrtc2 = Ds323x::new_ds3231(i2c_bus.acquire_i2c());
     let mut muxdev = i2c_bus.acquire_i2c();
 
-    // get the sys time and synchronize that onto the two RTCs
+    // Create two instances of the DS3231 driver
+    let mut ds1 = Ds323x::new_ds3231(i2c_bus.acquire_i2c());
+    let mut ds2 = Ds323x::new_ds3231(i2c_bus.acquire_i2c());
+
+    // Create two instances of the RV3028 driver
+    let mut rv1 = RV3028::new_with_mux(i2c_bus.acquire_i2c(), MUX_I2C_ADDRESS, MUX_CHAN_ZERO);
+    let mut rv2 = RV3028::new_with_mux(i2c_bus.acquire_i2c(), MUX_I2C_ADDRESS, MUX_CHAN_SEVEN);
+
+    // get the host system timestamp and synchronize that onto all RTCs
     let now = Utc::now();
     let sys_timestamp_64 = now.timestamp();
     let sys_timestamp_32:u32 = sys_timestamp_64.try_into().unwrap();
-    let subsec_nanos = now.timestamp_subsec_nanos();
-
     let next_timestamp = sys_timestamp_32 + 1;
-    let wait_nanos: u64 = (1_000_000_000 - subsec_nanos).try_into().unwrap();
-    let wait_duration = Duration::from_nanos(wait_nanos);
+    let next_datetime = ds323x::NaiveDateTime::from_timestamp_opt(next_timestamp.into(), 0).unwrap();
+    let now_timestamp_micros = now.timestamp_subsec_micros();
+    let wait_micros:u64 = (1_000_000 - (now_timestamp_micros + 5)).into();
+    let wait_duration = Duration::from_micros(wait_micros);
     // sleep until the next second boundary to set the next second
     sleep(wait_duration);
 
     // the following should fail if the mux or child devices don't respond
-    rtc1.set_unix_time(next_timestamp).expect("couldn't set rtc1");
-    rtc2.set_unix_time(next_timestamp).expect("couldn't set rtc2");
-
-    let (sys_timestamp_start, subsec) = get_sys_timestamp_and_micros();
-    println!("set time {} at {} + {} us", next_timestamp, sys_timestamp_start, subsec );
-
-    let datetime = ds323x::NaiveDateTime::from_timestamp_opt(next_timestamp.into(), 0).unwrap();
+    rv1.set_unix_time(next_timestamp).expect("couldn't set rtc1");
     muxdev.write(MUX_I2C_ADDRESS, &[MUX_CHAN_TWO]).expect("mux ch2 i2c err");
-    dsrtc1.set_datetime(&datetime).unwrap();
-    muxdev.write(MUX_I2C_ADDRESS, &[MUX_CHAN_FOUR]).expect("mux ch4 i2c err");
-    dsrtc2.set_datetime(&datetime).unwrap();
+    ds1.set_datetime(&next_datetime).unwrap();
 
-    // check the drift over and over again
+    rv2.set_unix_time(next_timestamp).expect("couldn't set rtc2");
+    muxdev.write(MUX_I2C_ADDRESS, &[MUX_CHAN_FOUR]).expect("mux ch4 i2c err");
+    ds2.set_datetime(&next_datetime).unwrap();
+
+    let (sys_timestamp_start, set_subsec) = get_sys_timestamp_and_micros();
+    println!("set {} at {} + {} us", next_timestamp, sys_timestamp_start, set_subsec );
+
+    //TODO should we also force the host clock to the next_timestamp?
+
+    // clocks should now be synchronized-- wait a little while before reading
+    sleep(wait_duration);
+
+    // Read timestamps from all RTCs over and over again,
+    // until we detect they are mismatched, which indicates clock drift.
+    // Note that we read back from the clocks in the same order we wrote to them.
     loop {
-        let (sys_timestamp,  subsec) = get_sys_timestamp_and_micros();
-        let out1:i64 = rtc1.get_unix_time().expect("couldn't get RV unix time").into();
-        let out2:i64 = rtc2.get_unix_time().expect("couldn't get RV unix time").into();
+        let (sys_timestamp,  subsec_micros) = get_sys_timestamp_and_micros();
+
+        let rv1_out:i64 = rv1.get_unix_time().expect("couldn't get RV unix time").into();
         muxdev.write(MUX_I2C_ADDRESS, &[MUX_CHAN_TWO]).expect("mux ch2 i2c err");
-        let dsout1 = dsrtc1.datetime().expect("couldn't get DS datetime ").timestamp();
+        let ds1_out = ds1.datetime().expect("couldn't get DS datetime ").timestamp();
+
+        let rv2_out:i64 = rv2.get_unix_time().expect("couldn't get RV unix time").into();
         muxdev.write(MUX_I2C_ADDRESS, &[MUX_CHAN_FOUR]).expect("mux ch4 i2c err");
-        let dsout2 = dsrtc2.datetime().expect("couldn't get DS datetime").timestamp();
+        let ds2_out = ds2.datetime().expect("couldn't get DS datetime").timestamp();
 
         // adjust the check time so that we're checking as fast as we
         // can just after one second has elapsed
         let fall_back =
-            Duration::from_micros(subsec.into());
+            Duration::from_micros(subsec_micros.into());
         let wait_duration =
             Duration::from_secs(21).checked_sub(fall_back).unwrap();
 
-        if sys_timestamp != out1 || sys_timestamp != out2  ||
-          sys_timestamp != dsout1 || sys_timestamp != dsout2 {
-            println!("sys: {} us: {} rtc1: {} rtc2: {} ds1: {} ds2: {}",
-            sys_timestamp, subsec,
-            out1, out2,
-            dsout1, dsout2);
-            println!("time to drift: {}", sys_timestamp - sys_timestamp_start);
+        if sys_timestamp != rv1_out || sys_timestamp != rv2_out ||
+          sys_timestamp != ds1_out || sys_timestamp != ds2_out {
+            let total_time = sys_timestamp - sys_timestamp_start;
+            println!("sys: {} us: {} rv1: {} rv2: {} ds1: {} ds2: {}",
+                     sys_timestamp, subsec_micros,
+                     rv1_out, rv2_out,
+                     ds1_out, ds2_out);
+            println!("=== Drift secs: {} mins: {} hours: {} days: {}",
+                     total_time, total_time / 60, total_time / 3600, total_time / 62400);
             break;
         }
         else if (sys_timestamp % 5) == 0 {
