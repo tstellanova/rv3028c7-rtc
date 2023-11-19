@@ -209,6 +209,28 @@ where
         res
     }
 
+    pub fn disable_trickle_charge(&mut self) -> Result<(), E> {
+        self.mask_reg_bits(EEPROM_ADDRESS,         0b1110_1111u8)
+    }
+    pub fn enable_trickle_charge(&mut self) -> Result<(), E> {
+        self.enable_reg_bits(EEPROM_ADDRESS,         0b0001_0000u8)
+    }
+
+    /// Apply a mask to the register's bits
+    fn mask_reg_bits(&mut self, reg: u8, reg_mask: u8) -> Result<(), E> {
+        let mut val = self.read_register(reg)?;
+        val &=  reg_mask;
+        self.write_register(reg, val)
+    }
+
+    /// OR bits
+    fn enable_reg_bits(&mut self, reg: u8, reg_bits: u8) -> Result<(), E> {
+        let mut val = self.read_register(reg)?;
+        val |=  reg_bits;
+        self.write_register(reg, val)
+    }
+
+
     /// Set time of day (hours, minutes, seconds) in binary format
     pub fn set_time(&mut self, hours: u8, minutes: u8, seconds: u8) -> Result<(), E> {
         self.write_register(REG_HOURS, Self::bin_to_bcd(hours))?;

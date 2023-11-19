@@ -54,9 +54,9 @@ fn main() {
 
     // Create two instances of the RV3028 driver
     let mut rtc1 = RV3028::new_with_mux(i2c_bus.acquire_i2c(), MUX_I2C_ADDRESS, MUX_CHAN_ZERO);
+    rtc1.disable_trickle_charge().expect("unable to disable_trickle_charge");
     let mut rtc2 = RV3028::new_with_mux(i2c_bus.acquire_i2c(), MUX_I2C_ADDRESS, MUX_CHAN_SEVEN);
-    // let mut rtc1 = RV3028::new(i2c_bus.acquire_i2c());
-    // let mut rtc2 = RV3028::new(i2c_bus.acquire_i2c());
+    rtc2.disable_trickle_charge().expect("unable to disable_trickle_charge");
 
     let mut dsrtc1 = Ds323x::new_ds3231(i2c_bus.acquire_i2c());
     let mut dsrtc2 = Ds323x::new_ds3231(i2c_bus.acquire_i2c());
