@@ -2,7 +2,7 @@
 
 
 pub use rtcc::{
-  DateTimeAccess, NaiveDateTime
+  DateTimeAccess, NaiveDate, NaiveDateTime
 };
 
 
@@ -67,7 +67,7 @@ const REG_WEEKDAY_DATE_ALARM: u8 = 0x09;
 
 // This register is used to detect the occurrence of various interrupt events
 // and reliability problems in internal data.
-// const REG_STATUS: u8 = 0x0E;
+const REG_STATUS: u8 = 0x0E;
 
 // This register is used to specify the target for the Alarm Interrupt function
 // and the Periodic Time Update Interrupt function
@@ -79,7 +79,20 @@ const REG_WEEKDAY_DATE_ALARM: u8 = 0x09;
 // - stop/start status of clock and calendar operations
 // - interrupt controlled clock output on CLKOUT pin
 // - hour mode and time stamp enable
-// const REG_CONTROL2:u8 = 0x10;
+const REG_CONTROL2:u8 = 0x10;
+
+// Event Control R/WP ○ EHL ET ○ TSR TSOW TSS
+const REG_EVENT_CONTROL: u8 = 0x13;
+
+// Time Stamp function registers (Event Logging)
+const REG_COUNT_EVENTS_TS: u8 = 0x14; // Count TS
+const REG_SECONDS_TS: u8 = 0x15; // Seconds TS
+const REG_MINUTES_TS: u8 = 0x16; // Minutes TS
+const REG_HOURS_TS: u8 = 0x17; // Hours TS
+const REG_DATE_TS: u8 = 0x18; // Date TS
+const REG_MONTH_TS: u8 = 0x19; // Month TS
+const REG_YEAR_TS: u8 = 0x1A; // Month TS
+
 
 // First address of "Unix Time Counter"
 const REG_UNIX_TIME_0: u8 = 0x1B;
@@ -94,15 +107,29 @@ const REG_UNIX_TIME_0: u8 = 0x1B;
 
 // Status register bits:
 // const EEBUSY_BIT: u8 = 1 << 7;
+const EVENT_FLAG_BIT: u8 = 1 << 1; // EVT bit
 
 // EEPROM register addresses and commands
 pub const EEPROM_ADDRESS: u8 = 0x37;
 pub const EEPROM_CMD_READ: u8 = 0x00;
 pub const EEPROM_CMD_WRITE: u8 = 0x01;
 
+
+// Event Control register bits  R/WP ○ EHL ET ○ TSR TSOW TSS
+const TIME_STAMP_RESET_BIT: u8 = 1 << 2; // TSR bit
+const TIME_STAMP_OVERWRITE_BIT: u8 = 1 << 1; // TSOW bit
+const TIME_STAMP_SOURCE_BIT: u8 = 1 << 0; // TSS bit
+
+pub const TS_EVENT_SOURCE_EVI: u8 = 0; /// Event log event source is external interrupt EVI
+pub const TS_EVENT_SOURCE_BSF: u8 = 1; /// Event log event source is backup power switchover
+
+
+// Control2 register bits: TSE CLKIE UIE TIE AIE EIE 12_24 RESET
+const TIME_STAMP_ENABLE_BIT: u8 = 1 << 7; // TSE bit
+
 // EEPROM register bits:
 const TRICKLE_CHARGE_ENABLE_BIT: u8 = 1 << 5; // TCE bit
-// const TRICKLE_CHARGE_RESISTANCE_BITS_3K: u8 = 0b00; //TCR bit
+// const TRICKLE_CHARGE_RESISTANCE_BITS_3K: u8 = 0b00; // TCR bit
 // const TRICKLE_CHARGE_RESISTANCE_BITS_5K: u8 = 0b01;
 // const TRICKLE_CHARGE_RESISTANCE_BITS_9K: u8 = 0b10;
 // const TRICKLE_CHARGE_RESISTANCE_BITS_15K: u8 = 0b11;
@@ -358,6 +385,12 @@ impl<I2C, E> RV3028<I2C>
     Ok((Self::bcd_to_bin(value), is_weekday))
   }
 
+  // read a block of registers all at once
+  fn read_multi_registers(&mut self, reg: u8, read_buf: &mut [u8] )  -> Result<(), E> {
+    self.select_mux_channel()?;
+    self.i2c.read(reg, read_buf)
+  }
+
   /// Set the Unix time counter
   pub fn set_unix_time(&mut self, unix_time: u32) -> Result<(), E> {
     self.select_mux_channel()?;
@@ -395,11 +428,33 @@ impl<I2C, E> RV3028<I2C>
     }
   }
 
+
+}
+
+pub trait EventTimeStampLogger {
+  /// Error type
+  type Error;
+
+  /// Enable or disable the Time Stamp Function for event logging
+  /// This logs external interrupts or other events
+  fn toggle_event_log(&mut self, enable: bool) -> Result<(), Self::Error>;
+
+  /// Get event count -- the number of events that have been logged since enabling logging
+  /// Returns the count of events since last reset, and the datetime of one event
+  fn get_event_count_and_datetime(&mut self) -> Result<(u32, NaiveDateTime), Self::Error>;
+
+  /// Enable or disable event time stamp overwriting
+  /// If this is enabled, the most recent event time stamp is saved.
+  /// If this is disabled, the first event time stamp is saved.
+  fn toggle_time_stamp_overwrite(&mut self, enable: bool) -> Result<(), Self::Error>;
+
+  /// Select a source for events to be logged, device-specific
+  fn set_event_source(&mut self, source: u8) -> Result<(), Self::Error>;
 }
 
 impl<I2C, E> DateTimeAccess for  RV3028<I2C>
   where
-    I2C: Write<Error = E> + Read<Error = E> + WriteRead<Error = E>
+    I2C: Write<Error = E> + Read<Error = E> + WriteRead<Error = E>,
 {
   type Error = E;
 
@@ -419,6 +474,65 @@ impl<I2C, E> DateTimeAccess for  RV3028<I2C>
   fn set_datetime(&mut self, datetime: &NaiveDateTime) -> Result<(), Self::Error> {
     let unix_timestamp: u32 = datetime.timestamp().try_into().unwrap();
     self.set_unix_time(unix_timestamp)
+  }
+
+}
+impl<I2C, E> EventTimeStampLogger for  RV3028<I2C>
+  where
+    I2C: Write<Error = E> + Read<Error = E> + WriteRead<Error = E>
+{
+  type Error = E;
+
+
+  fn toggle_event_log(&mut self, enable: bool) -> Result<(), Self::Error> {
+    if enable {
+      // prep to start listening for events
+      self.set_reg_bits(REG_CONTROL2, TIME_STAMP_ENABLE_BIT)?;
+      // First reset all the event counters and reset last event time stamp to zero
+      self.set_reg_bits(REG_EVENT_CONTROL, TIME_STAMP_RESET_BIT)?;
+      // clear the single event detect flag
+      self.clear_reg_bits(REG_STATUS, EVENT_FLAG_BIT)
+    }
+    else {
+      self.clear_reg_bits(REG_CONTROL2, TIME_STAMP_ENABLE_BIT)
+    }
+  }
+
+  fn get_event_count_and_datetime(&mut self) -> Result<(u32, NaiveDateTime), Self::Error> {
+    // Read the raw Time Stamp Function registers
+    let mut read_buf:[u8;7] = [0u8;7];
+    self.read_multi_registers(REG_COUNT_EVENTS_TS, &mut read_buf)?;
+    let count =  read_buf[(REG_COUNT_EVENTS_TS - REG_COUNT_EVENTS_TS) as usize];
+    let year = Self::bcd_to_bin(read_buf[ (REG_YEAR_TS - REG_COUNT_EVENTS_TS) as usize] );
+    let month = Self::bcd_to_bin(read_buf[(REG_MONTH_TS - REG_COUNT_EVENTS_TS) as usize]);
+    let day = Self::bcd_to_bin(read_buf[(REG_DATE_TS - REG_COUNT_EVENTS_TS) as usize]);
+    let hour = Self::bcd_to_bin(read_buf[(REG_HOURS_TS - REG_COUNT_EVENTS_TS) as usize]);
+    let minute = Self::bcd_to_bin(read_buf[(REG_MINUTES_TS - REG_COUNT_EVENTS_TS) as usize]);
+    let second = Self::bcd_to_bin( read_buf[(REG_SECONDS_TS  - REG_COUNT_EVENTS_TS) as usize]);
+
+    let dt =
+      NaiveDate::from_ymd_opt(year as i32, month as u32, day as u32).unwrap()
+        .and_hms_opt(hour as u32, minute as u32, second as u32).unwrap();
+
+    Ok((count.into(), dt))
+  }
+
+  fn toggle_time_stamp_overwrite(&mut self, enable: bool) -> Result<(), Self::Error> {
+    if enable {
+      self.set_reg_bits(REG_EVENT_CONTROL, TIME_STAMP_OVERWRITE_BIT)
+    }
+    else {
+      self.clear_reg_bits(REG_EVENT_CONTROL, TIME_STAMP_OVERWRITE_BIT)
+    }
+  }
+
+  fn set_event_source(&mut self, source: u8) -> Result<(), Self::Error> {
+    if TS_EVENT_SOURCE_EVI == source {
+      self.clear_reg_bits(REG_EVENT_CONTROL, TIME_STAMP_SOURCE_BIT)
+    }
+    else {
+      self.set_reg_bits(REG_EVENT_CONTROL, TIME_STAMP_SOURCE_BIT)
+    }
   }
 
 }
