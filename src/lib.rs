@@ -388,7 +388,7 @@ impl<I2C, E> RV3028<I2C>
   // read a block of registers all at once
   fn read_multi_registers(&mut self, reg: u8, read_buf: &mut [u8] )  -> Result<(), E> {
     self.select_mux_channel()?;
-    self.i2c.read(reg, read_buf)
+    self.i2c.write_read(RV3028_ADDRESS, &[reg], read_buf)
   }
 
   /// Set the Unix time counter
@@ -409,7 +409,8 @@ impl<I2C, E> RV3028<I2C>
   pub fn get_unix_time(&mut self) -> Result<u32, E> {
     self.select_mux_channel()?;
     let mut read_buf = [0u8; 4];
-    self.i2c.write_read(RV3028_ADDRESS, &[REG_UNIX_TIME_0], &mut read_buf)?;
+    self.read_multi_registers(REG_UNIX_TIME_0,&mut read_buf)?;
+    // self.i2c.write_read(RV3028_ADDRESS, &[REG_UNIX_TIME_0], &mut read_buf)?;
     let val = u32::from_le_bytes(read_buf);
     Ok(val)
   }
@@ -488,7 +489,7 @@ impl<I2C, E> EventTimeStampLogger for  RV3028<I2C>
     if enable {
       // prep to start listening for events
       self.set_reg_bits(REG_CONTROL2, TIME_STAMP_ENABLE_BIT)?;
-      // First reset all the event counters and reset last event time stamp to zero
+      // First reset all the event counters and reset saved event time stamp to zero
       self.set_reg_bits(REG_EVENT_CONTROL, TIME_STAMP_RESET_BIT)?;
       // clear the single event detect flag
       self.clear_reg_bits(REG_STATUS, EVENT_FLAG_BIT)
@@ -502,17 +503,28 @@ impl<I2C, E> EventTimeStampLogger for  RV3028<I2C>
     // Read the raw Time Stamp Function registers
     let mut read_buf:[u8;7] = [0u8;7];
     self.read_multi_registers(REG_COUNT_EVENTS_TS, &mut read_buf)?;
+
+    let second = Self::bcd_to_bin( read_buf[(REG_SECONDS_TS  - REG_COUNT_EVENTS_TS) as usize]);
+    let minute = Self::bcd_to_bin(read_buf[(REG_MINUTES_TS - REG_COUNT_EVENTS_TS) as usize]);
+    let hour = Self::bcd_to_bin(read_buf[(REG_HOURS_TS - REG_COUNT_EVENTS_TS) as usize]);
+
     let count =  read_buf[(REG_COUNT_EVENTS_TS - REG_COUNT_EVENTS_TS) as usize];
-    let year = Self::bcd_to_bin(read_buf[ (REG_YEAR_TS - REG_COUNT_EVENTS_TS) as usize] );
+    let year: i32 = Self::bcd_to_bin(read_buf[ (REG_YEAR_TS - REG_COUNT_EVENTS_TS) as usize] ).into();
     let month = Self::bcd_to_bin(read_buf[(REG_MONTH_TS - REG_COUNT_EVENTS_TS) as usize]);
     let day = Self::bcd_to_bin(read_buf[(REG_DATE_TS - REG_COUNT_EVENTS_TS) as usize]);
-    let hour = Self::bcd_to_bin(read_buf[(REG_HOURS_TS - REG_COUNT_EVENTS_TS) as usize]);
-    let minute = Self::bcd_to_bin(read_buf[(REG_MINUTES_TS - REG_COUNT_EVENTS_TS) as usize]);
-    let second = Self::bcd_to_bin( read_buf[(REG_SECONDS_TS  - REG_COUNT_EVENTS_TS) as usize]);
 
-    let dt =
-      NaiveDate::from_ymd_opt(year as i32, month as u32, day as u32).unwrap()
-        .and_hms_opt(hour as u32, minute as u32, second as u32).unwrap();
+    let dt = {
+      if count > 0 {
+        let date = NaiveDate::from_ymd_opt(year as i32, month as u32, day as u32)
+          .expect("No luck with YMD");
+        date.and_hms_opt(hour as u32, minute as u32, second as u32)
+          .expect("No luck with HMS")
+      }
+      else {
+        NaiveDateTime::from_timestamp_opt(0,0).unwrap()
+      }
+    };
+
 
     Ok((count.into(), dt))
   }

@@ -5,7 +5,10 @@ use chrono::{ Utc};
 use rv3028c7_rtc::{RV3028, EventTimeStampLogger};
 use std::time::Duration;
 use std::thread::sleep;
-
+// use sysfs_gpio::{Pin, Direction};
+use linux_embedded_hal::{CdevPin,
+                         gpio_cdev::{Chip, LineRequestFlags}};
+use embedded_hal::digital::v2::OutputPin;
 
 
 
@@ -15,7 +18,7 @@ use std::thread::sleep;
 /// The following was tested by enabling i2c-1 on a Raspberry Pi 3+
 /// using `sudo raspi-config`
 /// and connecting the SDA, SCL, GND, and 3.3V pins from RPi to the RTC
-/// and connecting a gpio pin from rpi to the EVI pin of the RTC
+/// and connecting a gpio pin (Pin 17 in this case) from rpi to the EVI pin of the RTC
 
 fn get_sys_timestamp() -> u32 {
     let now = Utc::now();
@@ -23,50 +26,53 @@ fn get_sys_timestamp() -> u32 {
     now_timestamp.try_into().unwrap()
 }
 
+
 fn main() {
+    // Grab a GPIO output pin on the host for sending digital signals to RTC
+    // This is a specific configuration for Raspberry Pi -- YMMV
+    let mut gpiochip = Chip::new("/dev/gpiochip0").unwrap();
+    let line = gpiochip.get_line(17).unwrap();
+    let handle = line.request(LineRequestFlags::OUTPUT, 1, "gpio_evi").unwrap();
+    let mut evi_pin = CdevPin::new(handle).expect("new CdevPin");
+    evi_pin.set_low().expect("set low");
 
     // Initialize the I2C device
     let i2c = I2cdev::new("/dev/i2c-1")
         .expect("Failed to open I2C device");
+    let i2c_bus = shared_bus::BusManagerSimple::new(i2c);
 
     // Create a new instance of the RV3028 driver
-    let mut rtc = RV3028::new(i2c);
+    let mut rtc = RV3028::new(i2c_bus.acquire_i2c());
+
+    let sys_unix_timestamp = get_sys_timestamp();
+    rtc.set_unix_time(sys_unix_timestamp).expect("set_unix_time");
+    let rtc_unix_time = rtc.get_unix_time().expect("couldn't get unix time");
+    println!("start sys {} rtc {} ", sys_unix_timestamp, rtc_unix_time);
+
+    // clear any existing event logging
+    rtc.toggle_event_log(false).unwrap();
+    sleep(Duration::from_millis(100));
     rtc.toggle_event_log(true).unwrap();
 
-    loop {
-
-        let rtc_unix_time = rtc.get_unix_time().expect("couldn't get unix time");
-        let sys_unix_timestamp = get_sys_timestamp();
-        println!("{}, {}", sys_unix_timestamp, rtc_unix_time);
-        sleep(Duration::from_secs(60));
+    let (event_count, dt) =
+      rtc.get_event_count_and_datetime().expect("get_event_count_and_datetime");
+    if 0 != event_count {
+        println!("init count: {} dt: {}", event_count, dt);
     }
 
-    // // Pull the current system time and synchronize RTC time to that
-    // let (_now_timestamp, now_year, now_month, now_date, now_hour, now_minute, now_second) =
-    //     get_sys_date_time();
-    // let input_unix_time: u32 = get_sys_timestamp();
-    // rtc.set_unix_time(input_unix_time).expect("couldn't set unix time");
-    // let output_unix_time = rtc.get_unix_time().expect("couldn't get unix time");
-    // println!("unix timestamp in: {} out: {}", input_unix_time, output_unix_time);
-    //
-    // println!("sys date: {}-{:02}-{:02}", (2000u32 + now_year as u32), now_month, now_date);
-    // let (year, month, day) = rtc.get_year_month_day()
-    //     .expect("Failed to get date");
-    // println!("rtc date: {}-{:02}-{:02}", (2000u32 + year as u32), month, day);
-    //
-    // let (hours, minutes, seconds) = rtc.get_time()
-    //     .expect("Failed to get time");
-    // println!("rtc time: {:02}:{:02}:{:02}", hours, minutes, seconds);
-    // println!("sys time: {:02}:{:02}:{:02}", now_hour, now_minute, now_second);
-    //
-
-    // // check the drift over and over again
-    // loop {
-    //     let rtc_unix_time = rtc.get_unix_time().expect("couldn't get unix time");
-    //     let sys_unix_timestamp = get_sys_timestamp();
-    //     println!("{}, {}", sys_unix_timestamp, rtc_unix_time);
-    //     sleep(Duration::from_secs(60));
-    // }
+    let mut toggle_count: u32 = 0;
+    for _i in 0..10 {
+        evi_pin.set_high().expect("EVI set high");
+        sleep(Duration::from_millis(100));
+        evi_pin.set_low().expect("EVI set low");
+        sleep(Duration::from_millis(100));
+        toggle_count += 1;
+        let (event_count, dt) =
+          rtc.get_event_count_and_datetime().expect("get_event_count_and_datetime");
+        if 0 != event_count {
+            println!("toggles: {} count: {} dt: {}", toggle_count, event_count, dt);
+        }
+    }
 
 
 }
