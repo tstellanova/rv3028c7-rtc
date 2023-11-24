@@ -2,8 +2,8 @@ extern crate rv3028c7_rtc;
 
 use std::ops::{Add};
 use linux_embedded_hal::I2cdev;
-use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike, Utc, Weekday};
-use rv3028c7_rtc::{RV3028, INVALID_WEEKDAY};
+use chrono::{Datelike, NaiveDateTime, Timelike, Utc, Weekday};
+use rv3028c7_rtc::{RV3028};
 use std::time::Duration;
 use std::thread::sleep;
 use linux_embedded_hal::{CdevPin, gpio_cdev::{Chip, LineRequestFlags}};
@@ -30,26 +30,25 @@ fn get_sys_timestamp() -> u32 {
 
 
 fn run_iteration<I2C,E>(rtc: &mut RV3028<I2C>, alarm_dt: &NaiveDateTime,
-                 weekday: u8,
+                 weekday: Option<Weekday>,
                  match_day: bool, match_hour: bool, match_minute: bool)
     where
       I2C: Write<Error = E> + Read<Error = E> + WriteRead<Error = E>,
       E: std::fmt::Debug
 {
-    rtc.set_alarm( &alarm_dt,
-                   if weekday < 7 { weekday } else {INVALID_WEEKDAY},
+    rtc.set_alarm( &alarm_dt, weekday,
                    match_day, match_hour, match_minute).unwrap();
 
     let (dt, out_weekday, out_match_day, out_match_hour, out_match_minute) =
       rtc.get_alarm_datetime_wday_matches().unwrap();
-    if weekday < 7 {
+    if let Some(inner_weekday) = weekday {
         println!("weekday alarm dt: {} wd: {} match_day {} match_hour {} match_minute {}",
-                 dt, out_weekday, out_match_day, out_match_hour, out_match_minute
+                 dt, inner_weekday, out_match_day, out_match_hour, out_match_minute
         );
     }
     else {
-        println!("date alarm dt: {} wd: {} match_day {} match_hour {} match_minute {}",
-                 dt, out_weekday, out_match_day, out_match_hour, out_match_minute
+        println!("date alarm dt: {} match_day {} match_hour {} match_minute {}",
+                 dt, out_match_day, out_match_hour, out_match_minute
         );
     }
 
@@ -59,13 +58,12 @@ fn run_iteration<I2C,E>(rtc: &mut RV3028<I2C>, alarm_dt: &NaiveDateTime,
     assert_eq!(match_hour, out_match_hour);
     assert_eq!(match_minute, out_match_minute);
 
-    if weekday < 7 {
+    if weekday.is_some() {
         // weekday-based alarm
         assert_eq!(out_weekday, weekday);
     }
     else {
         // date-based alarm
-        assert_eq!(out_weekday, INVALID_WEEKDAY);
         assert_eq!(dt.date().day(), alarm_dt.date().day());
     }
 
@@ -99,27 +97,27 @@ fn main() {
     println!("alarm_dt: {}", alarm_dt);
 
     // date alarm variations
-    run_iteration(&mut rtc, &alarm_dt, INVALID_WEEKDAY, true, true, true);
-    run_iteration(&mut rtc, &alarm_dt, INVALID_WEEKDAY, true, true, false);
-    run_iteration(&mut rtc, &alarm_dt, INVALID_WEEKDAY, true, false, false);
-    run_iteration(&mut rtc, &alarm_dt, INVALID_WEEKDAY, false, false, false);
-    run_iteration(&mut rtc, &alarm_dt, INVALID_WEEKDAY, false, false, true);
-    run_iteration(&mut rtc, &alarm_dt, INVALID_WEEKDAY, false, true, true);
-    run_iteration(&mut rtc, &alarm_dt, INVALID_WEEKDAY, false, true, false);
-    run_iteration(&mut rtc, &alarm_dt, INVALID_WEEKDAY, true, false, true);
+    run_iteration(&mut rtc, &alarm_dt, None, true, true, true);
+    run_iteration(&mut rtc, &alarm_dt, None, true, true, false);
+    run_iteration(&mut rtc, &alarm_dt, None, true, false, false);
+    run_iteration(&mut rtc, &alarm_dt, None, false, false, false);
+    run_iteration(&mut rtc, &alarm_dt, None, false, false, true);
+    run_iteration(&mut rtc, &alarm_dt, None, false, true, true);
+    run_iteration(&mut rtc, &alarm_dt, None, false, true, false);
+    run_iteration(&mut rtc, &alarm_dt, None, true, false, true);
 
     // weekday alarm variations
-    run_iteration(&mut rtc, &alarm_dt, Weekday::Mon as u8, true, true, true);
-    run_iteration(&mut rtc, &alarm_dt, Weekday::Tue as u8, true, true, false);
-    run_iteration(&mut rtc, &alarm_dt, Weekday::Wed as u8, true, false, false);
-    run_iteration(&mut rtc, &alarm_dt, Weekday::Thu as u8, false, false, false);
-    run_iteration(&mut rtc, &alarm_dt, Weekday::Fri as u8, false, false, true);
-    run_iteration(&mut rtc, &alarm_dt, Weekday::Sat as u8, false, true, true);
-    run_iteration(&mut rtc, &alarm_dt, Weekday::Sun as u8, false, true, false);
-    run_iteration(&mut rtc, &alarm_dt, Weekday::Mon as u8, true, false, true);
+    run_iteration(&mut rtc, &alarm_dt, Some(Weekday::Mon), true, true, true);
+    run_iteration(&mut rtc, &alarm_dt, Some(Weekday::Tue), true, true, false);
+    run_iteration(&mut rtc, &alarm_dt, Some(Weekday::Wed) , true, false, false);
+    run_iteration(&mut rtc, &alarm_dt, Some(Weekday::Thu), false, false, false);
+    run_iteration(&mut rtc, &alarm_dt, Some(Weekday::Fri), false, false, true);
+    run_iteration(&mut rtc, &alarm_dt, Some(Weekday::Sat), false, true, true);
+    run_iteration(&mut rtc, &alarm_dt, Some(Weekday::Sun), false, true, false);
+    run_iteration(&mut rtc, &alarm_dt, Some(Weekday::Mon), true, false, true);
 
     // prep for alarm output on INT pin
-    run_iteration(&mut rtc, &alarm_dt, INVALID_WEEKDAY, false, false, true);
+    run_iteration(&mut rtc, &alarm_dt, None, false, false, true);
 
     // rtc.toggle_alarm_int_enable(true).unwrap();
     // println!("wait for alarm to trigger...");

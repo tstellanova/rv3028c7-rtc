@@ -1,11 +1,8 @@
 #![cfg_attr(not(test), no_std)]
 
 
-pub use rtcc::{
-  DateTimeAccess, NaiveDate, NaiveDateTime, Datelike, Timelike,
-};
-
-
+pub use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike, Weekday};
+pub use rtcc::{  DateTimeAccess };
 
 use embedded_hal::blocking::i2c::{Write, Read, WriteRead};
 
@@ -140,9 +137,6 @@ const TRICKLE_CHARGE_ENABLE_BIT: u8 = 1 << 5; // TCE bit
 // pub const TRICKLE_CHARGE_RESISTANCE_VALUE_9K: u8 = 0b10;
 // pub const TRICKLE_CHARGE_RESISTANCE_VALUE_15K: u8 = 0b11;
 
-/// Days of week are 0..6 as defined by chrono::Weekday
-/// This value represents a known invalid weekday
-pub const INVALID_WEEKDAY:u8 = 28;
 
 // Special alarm register value
 const ALARM_NO_WATCH_FLAG: u8 = 1 <<  7;
@@ -422,12 +416,12 @@ impl<I2C, E> RV3028<I2C>
   /// All-in-one method to set an alarm:
   /// See the App Note section "Procedure to use the Alarm Interrupt"
   /// Note only date/weekday, hour, minute are supported
-  /// - If `weekday` is in the range 0..6 then it'll setup a weekday alarm rather than date alarm
+  /// - If `weekday` is provided then it'll setup a weekday alarm rather than date alarm
   /// - `match_day` indicates whether the day (or weekday) should be matched for the alarm
   /// - `match_hour` indicates whether the hour should be matched for the alarm
   /// - `match_minute` indicates whether the minutes should be matched for the alarm
   pub fn set_alarm(&mut self, datetime: &NaiveDateTime,
-                   weekday: u8, match_day: bool, match_hour: bool, match_minute: bool) -> Result<(), E> {
+                   weekday: Option<Weekday>, match_day: bool, match_hour: bool, match_minute: bool) -> Result<(), E> {
 
     // Initialize AF to 0; AIE/ALARM_INT_ENABLE_BIT is managed independently
     self.clear_reg_bits(REG_STATUS, ALARM_FLAG_BIT)?;
@@ -442,8 +436,8 @@ impl<I2C, E> RV3028<I2C>
                         if match_minute { bcd_minute }
                         else { ALARM_NO_WATCH_FLAG | bcd_minute })?;
 
-    if weekday < 7 { // Clear WADA for weekday alarm
-      let bcd_weekday = Self::bin_to_bcd(weekday);
+    if let Some(inner_weekday) = weekday { // Clear WADA for weekday alarm
+      let bcd_weekday = Self::bin_to_bcd(inner_weekday as u8);
       self.clear_reg_bits(REG_CONTROL1, WADA_BIT)?;
       self.write_register(REG_WEEKDAY_DATE_ALARM,
                           if match_day { bcd_weekday }
@@ -464,7 +458,7 @@ impl<I2C, E> RV3028<I2C>
   }
 
   pub fn get_alarm_datetime_wday_matches(&mut self)
-    -> Result<(NaiveDateTime, u8, bool, bool, bool), E> {
+    -> Result<(NaiveDateTime, Option<Weekday>, bool, bool, bool), E> {
 
     let raw_day = self.read_register(REG_WEEKDAY_DATE_ALARM)?;
     let match_day = 0 == (raw_day & ALARM_NO_WATCH_FLAG);
@@ -478,14 +472,14 @@ impl<I2C, E> RV3028<I2C>
     let match_minutes = 0 == (raw_minutes & ALARM_NO_WATCH_FLAG);
     let minutes = Self::bcd_to_bin(0x7F & raw_minutes);
 
-    let mut weekday: u8 = INVALID_WEEKDAY;
+    let mut weekday = None;
 
     let wada_state = self.read_register(REG_CONTROL1)? & WADA_BIT;
 
     let dt =
       if 0 == wada_state {
         // weekday alarm
-        weekday = day;
+        weekday = Some(Weekday::try_from(day).unwrap());
         NaiveDateTime::UNIX_EPOCH.with_hour(hour as u32).unwrap()
           .with_minute(minutes as u32).unwrap()
       }
@@ -673,34 +667,7 @@ mod tests {
     assert_eq!(seconds, 58);
   }
 
-  // #[test]
-  // fn test_set_alarm_minutes() {
-  //   let expectations = [I2cTrans::write(RV3028_ADDRESS, vec![ REG_MINUTES_ALARM, RV3028::<I2cMock>::bin_to_bcd(15)])];
-  //   let mock = I2cMock::new(&expectations);
-  //   let mut rv3028 = RV3028::new(mock);
-  //   rv3028.set_alarm_minutes(15).unwrap();
-  // }
 
-  // #[test]
-  // fn test_get_alarm_minutes() {
-  //   let expectations = [
-  //     I2cTrans::write_read(RV3028_ADDRESS, vec![REG_MINUTES_ALARM], vec![RV3028::<I2cMock>::bin_to_bcd(15)]),
-  //   ];
-  //   let mock = I2cMock::new(&expectations);
-  //   let mut rv3028 = RV3028::new(mock);
-  //   assert_eq!(rv3028.get_alarm_minutes().unwrap(), 15);
-  // }
-  //
-  // //TODO similar tests for set_alarm_hours, get_alarm_hours, get_alarm_weekday_date
-  //
-  // #[test]
-  // fn test_set_alarm_weekday_date() {
-  //   let expectations = [I2cTrans::write(RV3028_ADDRESS, vec![REG_WEEKDAY_DATE_ALARM, RV3028::<I2cMock>::bin_to_bcd(2)])];
-  //   let mock = I2cMock::new(&expectations);
-  //   let mut rv3028 = RV3028::new(mock);
-  //   rv3028.set_alarm_weekday_date(2, true).unwrap();
-  // }
-  //
   #[test]
   fn test_set_year_month_day() {
     let expectations = [
