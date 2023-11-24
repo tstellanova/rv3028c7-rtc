@@ -9,7 +9,7 @@ use std::thread::sleep;
 use linux_embedded_hal::{CdevPin,
                          gpio_cdev::{Chip, LineRequestFlags}};
 use embedded_hal::digital::v2::OutputPin;
-
+use rtcc::DateTimeAccess;
 
 
 /// Example testing real RTC communications,
@@ -49,8 +49,14 @@ fn main() {
     let rtc_unix_time = rtc.get_unix_time().expect("couldn't get unix time");
     println!("start sys {} rtc {} ", sys_unix_timestamp, rtc_unix_time);
 
+    let init_dt = rtc.datetime().expect("datetime");
+    println!("init_dt: {}", init_dt);
+
     // clear any existing event logging
     rtc.toggle_event_log(false).unwrap();
+    rtc.toggle_event_high_low(true).unwrap();
+    // allow saving of the latest event time stamp
+    rtc.toggle_time_stamp_overwrite(true).expect("toggle_time_stamp_overwrite");
     sleep(Duration::from_millis(100));
     rtc.toggle_event_log(true).unwrap();
 
@@ -61,17 +67,19 @@ fn main() {
     }
 
     let mut toggle_count: u32 = 0;
-    for _i in 0..10 {
+    for _i in 0..90 {
         evi_pin.set_high().expect("EVI set high");
-        sleep(Duration::from_millis(100));
+        sleep(Duration::from_micros(100));
         evi_pin.set_low().expect("EVI set low");
-        sleep(Duration::from_millis(100));
         toggle_count += 1;
         let (event_count, dt) =
           rtc.get_event_count_and_datetime().expect("get_event_count_and_datetime");
         if 0 != event_count {
-            println!("toggles: {} count: {} dt: {}", toggle_count, event_count, dt);
+            let now = Utc::now();
+            println!("toggles: {} count: {} dt: {} sys: {}", toggle_count, event_count, dt, now);
         }
+        // wait another second before sending a pulse
+        sleep(Duration::from_secs(1));
     }
 
 
