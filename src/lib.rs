@@ -426,31 +426,52 @@ impl<I2C, E> RV3028<I2C>
     // Initialize AF to 0; AIE/ALARM_INT_ENABLE_BIT is managed independently
     self.clear_reg_bits(REG_STATUS, ALARM_FLAG_BIT)?;
 
-    let bcd_hour = Self::bin_to_bcd(datetime.time().hour() as u8);
-    self.write_register(REG_HOURS_ALARM,
-                        if match_hour { bcd_hour  }
-                        else { ALARM_NO_WATCH_FLAG | bcd_hour })?;
+    // Procedure suggested by App Notes:
+    // 1. Initialize bits AIE and AF to 0.
+    // 2. Choose weekday alarm or date alarm (weekday/date) by setting the WADA bit. WADA = 0 for weekday alarm
+    // or WADA = 1 for date alarm.
+    // 3. Write the desired alarm settings in registers 07h to 09h. The three alarm enable bits, AE_M, AE_H and
+    // AE_WD, are used to select the corresponding register that has to be taken into account for match or not.
+    // See the following table.
+    // 4. Set CAIE bit to 1 to enable clock output when an alarm occurs. See also CLOCK OUTPUT SCHEME.
+    // 5. Set the AIE bit to 1 if you want to get a hardware interrupt on INT̅ ̅ ̅ ̅ ̅
+    // pin.
+
+    if weekday.is_some() {  // Clear WADA for weekday alarm
+      self.clear_reg_bits(REG_CONTROL1, WADA_BIT)?;
+    }
+    else {
+      self.set_reg_bits(REG_CONTROL1, WADA_BIT)?;
+    }
 
     let bcd_minute = Self::bin_to_bcd(datetime.time().minute() as u8);
     self.write_register(REG_MINUTES_ALARM,
                         if match_minute { bcd_minute }
                         else { ALARM_NO_WATCH_FLAG | bcd_minute })?;
 
+    let bcd_hour = Self::bin_to_bcd(datetime.time().hour() as u8);
+    self.write_register(REG_HOURS_ALARM,
+                        if match_hour { bcd_hour  }
+                        else { ALARM_NO_WATCH_FLAG | bcd_hour })?;
+
     if let Some(inner_weekday) = weekday { // Clear WADA for weekday alarm
       let bcd_weekday = Self::bin_to_bcd(inner_weekday as u8);
-      self.clear_reg_bits(REG_CONTROL1, WADA_BIT)?;
       self.write_register(REG_WEEKDAY_DATE_ALARM,
                           if match_day { bcd_weekday }
                           else { ALARM_NO_WATCH_FLAG | bcd_weekday }
       )?;
     }
-    else { // Set WADA for date alarm
+    else {
       let bcd_day = Self::bin_to_bcd(datetime.date().day() as u8);
-      self.set_reg_bits(REG_CONTROL1, WADA_BIT)?;
       self.write_register(REG_WEEKDAY_DATE_ALARM,
                           if match_day { bcd_day }
                           else { ALARM_NO_WATCH_FLAG | bcd_day })?;
     }
+
+
+
+
+
     // Clear AF again in case the above setting process immediately triggered the alarm
     self.clear_reg_bits(REG_STATUS, ALARM_FLAG_BIT)?;
 

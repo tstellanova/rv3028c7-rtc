@@ -12,7 +12,7 @@ use rtcc::DateTimeAccess;
 
 use embedded_hal::blocking::i2c::{Write, Read, WriteRead};
 
-/// Example testing real RTC communications,
+/// Example testing real RTC interaction for alarm set/get,
 /// assuming linux environment (such as Raspberry Pi 3+)
 /// with RV3028 attached to i2c1.
 /// The following was tested by enabling i2c-1 on a Raspberry Pi 3+
@@ -20,7 +20,6 @@ use embedded_hal::blocking::i2c::{Write, Read, WriteRead};
 /// and connecting:
 /// - SDA, SCL, GND, and 3.3V pins from rpi to the RTC
 /// - GPIO 27 (physical pin 13) from rpi to the INT pin of the RTC
-///
 
 fn get_sys_timestamp() -> u32 {
     let now = Utc::now();
@@ -28,7 +27,7 @@ fn get_sys_timestamp() -> u32 {
     now_timestamp.try_into().unwrap()
 }
 
-
+// run through a single iteration of alarm set, and verify the value is set
 fn run_iteration<I2C,E>(rtc: &mut RV3028<I2C>, alarm_dt: &NaiveDateTime,
                  weekday: Option<Weekday>,
                  match_day: bool, match_hour: bool, match_minute: bool)
@@ -42,12 +41,12 @@ fn run_iteration<I2C,E>(rtc: &mut RV3028<I2C>, alarm_dt: &NaiveDateTime,
     let (dt, out_weekday, out_match_day, out_match_hour, out_match_minute) =
       rtc.get_alarm_datetime_wday_matches().unwrap();
     if let Some(inner_weekday) = weekday {
-        println!("weekday alarm dt: {} wd: {} match_day {} match_hour {} match_minute {}",
+        println!("weekday alarm dt: {} wd: {} match_day: {} match_hour: {} match_minute; {}",
                  dt, inner_weekday, out_match_day, out_match_hour, out_match_minute
         );
     }
     else {
-        println!("date alarm dt: {} match_day {} match_hour {} match_minute {}",
+        println!("date alarm dt: {} match_day: {} match_hour: {} match_minute: {}",
                  dt, out_match_day, out_match_hour, out_match_minute
         );
     }
@@ -91,8 +90,16 @@ fn main() {
     let rtc_unix_time = rtc.get_unix_time().expect("couldn't get unix time");
     println!("start sys {} rtc {} ", sys_unix_timestamp, rtc_unix_time);
 
+    // disable alarm interrupts to begin with
+    rtc.toggle_alarm_int_enable(false).unwrap();
+
+    let (first_alarm_dt, _out_weekday, _out_match_day, _out_match_hour, _out_match_minute) =
+      rtc.get_alarm_datetime_wday_matches().unwrap();
+    println!("first_alarm_dt {} ", first_alarm_dt);
+
+
     let init_dt = rtc.datetime().expect("datetime");
-    let alarm_dt = init_dt.add(Duration::from_secs(120));
+    let alarm_dt = init_dt.add(Duration::from_secs(60));
     println!("init_dt:  {}", init_dt);
     println!("alarm_dt: {}", alarm_dt);
 
@@ -116,14 +123,35 @@ fn main() {
     run_iteration(&mut rtc, &alarm_dt, Some(Weekday::Sun), false, true, false);
     run_iteration(&mut rtc, &alarm_dt, Some(Weekday::Mon), true, false, true);
 
-    // prep for alarm output on INT pin
-    run_iteration(&mut rtc, &alarm_dt, None, false, false, true);
-
-    // rtc.toggle_alarm_int_enable(true).unwrap();
-    // println!("wait for alarm to trigger...");
-    // sleep(Duration::from_secs(65));
-    // assert!(rtc.check_and_clear_alarm().unwrap());// alarm should trigger
-
-    sleep(Duration::from_secs(1));
     println!("int pin low? {} ", int_pin.is_low().unwrap());
+
+    // prep for alarm output on INT pin
+    run_iteration(&mut rtc, &alarm_dt, Some(alarm_dt.weekday()),
+                  false, false, false);
+    rtc.toggle_alarm_int_enable(true).unwrap();
+    let cur_dt = rtc.datetime().unwrap();
+    println!("wait for alarm to trigger..\r\n{} {}",cur_dt, alarm_dt);
+
+    let  last_low = int_pin.is_low().unwrap();
+    let  last_high = int_pin.is_high().unwrap();
+    for _i in 0..10 {
+        sleep(Duration::from_secs(10));
+
+        let alarm_af = rtc.check_and_clear_alarm().unwrap();
+        let cur_dt = rtc.datetime().unwrap();
+        println!("{} alarm flag: {}", cur_dt, alarm_af);
+
+        let pin_low = int_pin.is_low().unwrap();
+        let pin_high = int_pin.is_high().unwrap();
+        if pin_low != last_low || pin_high != last_high {
+            println!("pin high {} low {}", pin_high, pin_low);
+            break;
+        }
+        if alarm_af { break; }
+
+        if cur_dt.minute() > alarm_dt.minute() {
+            break;
+        }
+    }
+
 }
