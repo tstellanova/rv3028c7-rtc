@@ -127,7 +127,7 @@ fn main() {
 
     // prep for alarm output on INT pin
     run_iteration(&mut rtc, &alarm_dt, Some(alarm_dt.weekday()),
-                  false, false, false);
+                  false, false, true);
     rtc.toggle_alarm_int_enable(true).unwrap();
     let cur_dt = rtc.datetime().unwrap();
     println!("wait for alarm to trigger..\r\n{} {}",cur_dt, alarm_dt);
@@ -149,7 +149,7 @@ fn main() {
         }
         if alarm_af { break; }
 
-        if cur_dt.minute() > alarm_dt.minute() {
+        if cur_dt.minute() >= alarm_dt.minute() {
             break;
         }
     }

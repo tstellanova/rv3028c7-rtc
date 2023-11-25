@@ -1,6 +1,7 @@
 #![cfg_attr(not(test), no_std)]
 
 
+
 pub use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike, Weekday};
 pub use rtcc::{  DateTimeAccess };
 
@@ -406,7 +407,7 @@ impl<I2C, E> RV3028<I2C>
   /// return bool indicating whether the alarm triggered
   pub fn check_and_clear_alarm(&mut self) -> Result<bool, E> {
     let reg_val = self.read_register(REG_STATUS)?;
-    let alarm_flag_set = 0 != (reg_val & ALARM_FLAG_BIT);
+    let alarm_flag_set =  0 != (reg_val & ALARM_FLAG_BIT); // Check if the AF flag is set
     if alarm_flag_set {
       self.clear_reg_bits(REG_STATUS, ALARM_FLAG_BIT)?;
     }
