@@ -1,8 +1,8 @@
 extern crate rv3028c7_rtc;
 
-use core::convert::TryInto;
+use core::ops::Add;
 use linux_embedded_hal::I2cdev;
-use chrono::{NaiveDateTime, Utc};
+use chrono::{NaiveDateTime, Timelike, Utc};
 use rv3028c7_rtc::{RV3028, DateTimeAccess};
 use std::time::{Duration };
 use std::thread::sleep;
@@ -28,6 +28,18 @@ and relevant pins to the RTCs
 */
 
 
+fn get_simple_dt_and_subsec() -> (NaiveDateTime, u32) {
+    let now = Utc::now();
+    let dt = now.naive_utc();
+    let simple_dt = dt.with_nanosecond(0).unwrap();
+    (simple_dt, now.timestamp_subsec_micros())
+}
+
+fn get_sys_dt_and_subsec() -> (NaiveDateTime, u32) {
+    let now = Utc::now();
+    let dt = now.naive_utc();
+    (dt,  now.timestamp_subsec_micros())
+}
 
 fn get_sys_timestamp_and_micros() -> (i64, u32) {
     let now = Utc::now();
@@ -37,12 +49,18 @@ fn get_sys_timestamp_and_micros() -> (i64, u32) {
     )
 }
 
+
 const MUX_I2C_ADDRESS: u8 = 0x70;
 const MUX_CHAN_ZERO:u8 = 0b0000_0001 ; //channel 0, LSB
 const MUX_CHAN_SEVEN:u8 = 0b1000_0000 ; // channel 7, MSB
 
 const MUX_CHAN_TWO:u8 = 0b0000_0100 ; // channel 2 
 const MUX_CHAN_FOUR:u8 = 0b0001_0000 ; // channel 4
+
+const IDEAL_RELOAD_US: u32 = 4880; // time it takes to set all RTCs and recheck sys time
+const IDEAL_DELAY_US_LOW: u32 = 1_000_000 - IDEAL_RELOAD_US;
+const IDEAL_DELAY_US_HIGH: u32 = IDEAL_DELAY_US_LOW + 100;
+const IDEAL_HALF_DELAY_US: u32 = IDEAL_RELOAD_US/2;
 
 fn main() {
 
@@ -60,71 +78,73 @@ fn main() {
     let mut rv1 = RV3028::new_with_mux(i2c_bus.acquire_i2c(), MUX_I2C_ADDRESS, MUX_CHAN_ZERO);
     let mut rv2 = RV3028::new_with_mux(i2c_bus.acquire_i2c(), MUX_I2C_ADDRESS, MUX_CHAN_SEVEN);
 
-    // get the host system timestamp and synchronize that onto all RTCs
-    let now = Utc::now();
-    let sys_timestamp_64 = now.timestamp();
-    let sys_timestamp_32:u32 = sys_timestamp_64.try_into().unwrap();
-    let next_timestamp = sys_timestamp_32 + 1;
-    let next_datetime = NaiveDateTime::from_timestamp_opt(next_timestamp.into(), 0).unwrap();
-    let now_timestamp_micros = now.timestamp_subsec_micros();
-    let wait_micros:u64 = (1_000_000 - (now_timestamp_micros + 5)).into();
-    let wait_duration = Duration::from_micros(wait_micros);
-    // sleep until the next second boundary to set the next second
-    sleep(wait_duration);
+    'session: loop {
+        // get the host system timestamp and synchronize that onto all RTCs
+        let next_dt =
+          loop {
+              // catch the next whole second transition
+              let (simple_dt, subsec_micros) = get_simple_dt_and_subsec();
+              if subsec_micros < IDEAL_DELAY_US_LOW || subsec_micros > IDEAL_DELAY_US_HIGH  {
+                  continue 'session;
+              }
+              break simple_dt.add(Duration::from_secs(1))
+          };
 
-    // the following should fail if the mux or child devices don't respond
-    rv1.set_datetime(&next_datetime).unwrap();
-    muxdev.write(MUX_I2C_ADDRESS, &[MUX_CHAN_TWO]).expect("mux ch2 i2c err");
-    ds1.set_datetime(&next_datetime).unwrap();
-
-    rv2.set_datetime(&next_datetime).unwrap();
-    muxdev.write(MUX_I2C_ADDRESS, &[MUX_CHAN_FOUR]).expect("mux ch4 i2c err");
-    ds2.set_datetime(&next_datetime).unwrap();
-
-    let (sys_timestamp_start, set_subsec) = get_sys_timestamp_and_micros();
-    println!("set {} at {} + {} us", next_timestamp, sys_timestamp_start, set_subsec );
-
-    //TODO should we also force the host clock to the next_timestamp?
-
-    // clocks should now be synchronized-- wait a little while before reading
-    sleep(wait_duration);
-
-    // Read timestamps from all RTCs over and over again,
-    // until we detect they are mismatched, which indicates clock drift.
-    // Note that we read back from the clocks in the same order we wrote to them.
-    loop {
-        let (sys_timestamp,  subsec_micros) = get_sys_timestamp_and_micros();
-
-        let rv1_out:i64 = rv1.datetime().expect("couldn't get RV unix time").timestamp();
+        // the following should fail if the mux or child devices don't respond
+        rv1.set_datetime(&next_dt).unwrap();
         muxdev.write(MUX_I2C_ADDRESS, &[MUX_CHAN_TWO]).expect("mux ch2 i2c err");
-        let ds1_out = ds1.datetime().expect("couldn't get DS datetime ").timestamp();
+        ds1.set_datetime(&next_dt).unwrap();
 
-        let rv2_out:i64 = rv2.datetime().expect("couldn't get RV unix time").timestamp();
+        rv2.set_datetime(&next_dt).unwrap();
         muxdev.write(MUX_I2C_ADDRESS, &[MUX_CHAN_FOUR]).expect("mux ch4 i2c err");
-        let ds2_out = ds2.datetime().expect("couldn't get DS datetime").timestamp();
+        ds2.set_datetime(&next_dt).unwrap();
 
-        // adjust the check time so that we're checking as fast as we
-        // can just after one second has elapsed
-        let fall_back =
-            Duration::from_micros(subsec_micros.into());
-        let wait_duration =
-            Duration::from_secs(21).checked_sub(fall_back).unwrap();
+        let (sys_dt, subsec) = get_sys_dt_and_subsec();
+        // setting RTC times and rechecking sys time seems to take ~3800 micros with my equipment
+        println!("set time {} at {} ({} µs) ", next_dt, sys_dt, subsec);
+        if subsec > IDEAL_HALF_DELAY_US { continue 'session }
+        let sys_timestamp_start  = sys_dt.timestamp();
 
-        if sys_timestamp != rv1_out || sys_timestamp != rv2_out ||
-          sys_timestamp != ds1_out || sys_timestamp != ds2_out {
-            let total_time = sys_timestamp - sys_timestamp_start;
-            println!("sys: {} us: {} rv1: {} rv2: {} ds1: {} ds2: {}",
-                     sys_timestamp, subsec_micros,
-                     rv1_out, rv2_out,
-                     ds1_out, ds2_out);
-            println!("=== Drift secs: {} mins: {} hours: {} days: {}",
-                     total_time, total_time / 60, total_time / 3600, total_time / 62400);
-            break;
+
+        // Read timestamps from all RTCs over and over again,
+        // until we detect they are mismatched, which indicates clock drift.
+        // Note that we read back from the clocks in the same order we wrote to them.
+        loop {
+            let rv1_out = rv1.datetime().unwrap().timestamp();
+            muxdev.write(MUX_I2C_ADDRESS, &[MUX_CHAN_TWO]).expect("mux ch2 i2c err");
+            let ds1_out = ds1.datetime().unwrap().timestamp();
+
+            let rv2_out = rv2.datetime().unwrap().timestamp();
+            muxdev.write(MUX_I2C_ADDRESS, &[MUX_CHAN_FOUR]).expect("mux ch4 i2c err");
+            let ds2_out = ds2.datetime().unwrap().timestamp();
+
+            let (sys_timestamp, subsec_micros) = get_sys_timestamp_and_micros();
+
+            // adjust the check time so that we're checking as fast as we
+            // can just after one second has elapsed
+            let fall_back =
+              Duration::from_micros(((150*subsec_micros)/100) as u64);
+            let wait_duration =
+              Duration::from_secs(20).checked_sub(fall_back).unwrap();
+
+            let elapsed = sys_timestamp - sys_timestamp_start;
+
+            if sys_timestamp != rv1_out || sys_timestamp != rv2_out ||
+              sys_timestamp != ds1_out || sys_timestamp != ds2_out
+            {
+                println!("sys: {} µs:: {} rv1: {} rv2: {} ds1: {} ds2: {}",
+                         sys_timestamp, subsec_micros,
+                         rv1_out, rv2_out,
+                         ds1_out, ds2_out);
+                println!("=== Drift elapsed secs: {} mins: {} hours: {} days: {}",
+                         elapsed, elapsed / 60, elapsed / 3600, elapsed / 62400);
+                break;
+            } //else if (sys_timestamp % 5) == 0 {
+            else {
+                println!("elapsed: {} µs: {}", elapsed, subsec_micros);
+            }
+            sleep(wait_duration);
         }
-        else if (sys_timestamp % 5) == 0 {
-          println!("sys: {} duration: {}", sys_timestamp, sys_timestamp - sys_timestamp_start);
-        }
-        sleep(wait_duration);
     }
 
 }
