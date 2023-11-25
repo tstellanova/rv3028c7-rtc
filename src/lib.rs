@@ -302,6 +302,7 @@ impl<I2C, E> RV3028<I2C>
     Ok(())
   }
 
+  /// Get the year, month, day from the internal BCD registers
   pub fn get_ymd(&mut self) -> Result<(i32, u8, u8), E> {
     // TODO use read_multi_registers
     let year: i32 = Self::bcd_to_bin( self.read_register(REG_YEAR)? ) as i32 + 2000;
@@ -310,19 +311,28 @@ impl<I2C, E> RV3028<I2C>
     Ok((year, month, day))
   }
 
+  /// Get the hour, minute, second from the internal BCD registers
+  pub fn get_hms(&mut self) -> Result<(u8, u8, u8), E> {
+    let hours = Self::bcd_to_bin( self.read_register(REG_HOURS)?);
+    let minutes = Self::bcd_to_bin(self.read_register(REG_MINUTES)?);
+    let seconds = Self::bcd_to_bin(self.read_register(REG_SECONDS)?);
+    Ok( (hours, minutes, seconds) )
+  }
+
   // read a block of registers all at once
   fn read_multi_registers(&mut self, reg: u8, read_buf: &mut [u8] )  -> Result<(), E> {
     self.select_mux_channel()?;
     self.i2c.write_read(RV3028_ADDRESS, &[reg], read_buf)
   }
 
-  /// Set just the Unix time counter. Note that this does NOT set other registers
+  /// Set just the Unix time counter. Note that this does NOT set other internal BCD registers
   /// such as Year or Hour: if you want to set those as well, use the
   /// set_datetime method instead.
   pub fn set_unix_time(&mut self, unix_time: u32) -> Result<(), E> {
     self.select_mux_channel()?;
     let bytes = unix_time.to_le_bytes(); // Convert to little-endian byte array
     self.i2c.write(RV3028_ADDRESS, &[REG_UNIX_TIME_0, bytes[0], bytes[1], bytes[2], bytes[3]])
+    // TODO write reset to reset subsec counters?
   }
 
   /// Reads the value of the RTC's unix time counter, notionally seconds elapsed since the
@@ -534,9 +544,9 @@ impl<I2C, E> DateTimeAccess for  RV3028<I2C>
   }
 
   /// This implementation assumes (but doesn't verify)
-  /// that the caller is setting the RTC datetime to values within its range (from 1970 to 2099).
-  /// Setting values beyond 2099 (until 2106) might succeed but the RTC doesn't support
-  /// leap year corrections beyond 2099.
+  /// that the caller is setting the RTC datetime to values within its range (from 2000 to 2099).
+  /// The RTC doesn't support leap year corrections beyond 2099,
+  /// and the internal Year BCD register only runs from 0..99 (for 2000..2099)
   fn set_datetime(&mut self, datetime: &NaiveDateTime) -> Result<(), Self::Error> {
     let unix_timestamp: u32 = datetime.timestamp().try_into().unwrap();
     // unix timestamp counter is stored in registers separate from everything else:

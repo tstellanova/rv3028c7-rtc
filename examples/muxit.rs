@@ -1,12 +1,13 @@
 extern crate rv3028c7_rtc;
 
 use std::convert::TryInto;
+use core::ops::Add;
 use linux_embedded_hal::I2cdev;
-use chrono::{ Utc};
+use chrono::{NaiveDateTime, Utc};
 use rv3028c7_rtc::RV3028;
 use std::time::{Duration };
 use std::thread::sleep;
-
+use rtcc::DateTimeAccess;
 
 
 /**
@@ -26,21 +27,25 @@ and relevant pins to the two RTCs
 */
 
 
-fn get_sys_timestamp_and_nanos() -> (u32, u32) {
+fn get_sys_timestamp_and_nanos() -> (NaiveDateTime, u32, u32) {
     let now = Utc::now();
     (
+        now.naive_utc(),
         now.timestamp().try_into().unwrap(),
         now.timestamp_subsec_nanos()
     )
 }
 
-fn get_sys_timestamp_and_micros() -> (u32, u32) {
+fn get_sys_timestamp_and_micros() -> (NaiveDateTime, u32, u32) {
     let now = Utc::now();
     (
+        now.naive_utc(),
         now.timestamp().try_into().unwrap(),
         now.timestamp_subsec_micros(),
     )
 }
+
+
 
 const MUX_I2C_ADDRESS: u8 = 0x70;
 const MUX_CHAN_FIRST:u8 = 0b0000_0001 ; //channel 0, LSB
@@ -57,23 +62,23 @@ fn main() {
     let mut rtc2 = RV3028::new_with_mux(i2c_bus.acquire_i2c(), MUX_I2C_ADDRESS, MUX_CHAN_SECOND);
 
     // get the sys time and synchronize that onto the two RTCs
-    let (sys_timestamp, subsec_nanos) = get_sys_timestamp_and_nanos();
-    let next_timestamp = sys_timestamp + 1;
+    let (sys_dt, sys_timestamp, subsec_nanos) = get_sys_timestamp_and_nanos();
+    let next_dt = sys_dt.add(Duration::from_secs(1));
     let wait_nanos: u64 = (1_000_000_000 - subsec_nanos).try_into().unwrap();
     let wait_duration = Duration::from_nanos(wait_nanos);
     // sleep until the next second boundary to set the next second
     sleep(wait_duration);
 
     // the following should fail if the mux or child devices don't respond
-    rtc1.set_unix_time(next_timestamp).expect("couldn't set rtc1");
-    rtc2.set_unix_time(next_timestamp).expect("couldn't set rtc2");
+    rtc1.set_datetime(&next_dt).unwrap();
+    rtc2.set_datetime(&next_dt).unwrap();
 
-    let (sys_timestamp_start, subsec) = get_sys_timestamp_and_micros();
-    println!("set time {} at {} + {} us", next_timestamp, sys_timestamp_start, subsec );
+    let (sys_dt, sys_timestamp_start, subsec) = get_sys_timestamp_and_micros();
+    println!("set time {} at {} + {} us", next_dt, sys_dt, subsec );
 
     // check the drift over and over again
     loop {
-        let (sys_timestamp,  subsec) = get_sys_timestamp_and_micros();
+        let (sys_dt, sys_timestamp,  subsec) = get_sys_timestamp_and_micros();
         let out1 = rtc1.get_unix_time().expect("couldn't get unix time");
         let out2 = rtc2.get_unix_time().expect("couldn't get unix time");
 
