@@ -133,7 +133,13 @@ const EVENT_INT_ENABLE_BIT: u8 = 1 << 2;// EIE / Event Interrupt Enable bit
 
 // EEPROM register bits:
 const TRICKLE_CHARGE_ENABLE_BIT: u8 = 1 << 5; // TCE bit
-// const TRICKLE_CHARGE_RESISTANCE_BITS: u8 = 1 << 0; // TCR bit
+const TRICKLE_CHARGE_RESISTANCE_BITS: u8 = 0b11; // TCR bits
+pub enum TrickleChargeCurrentLimiter {
+  Ohms3k = 0b00,
+  Ohms5k = 0b01,
+  Ohms9k = 0b10,
+  Ohms15k = 0b11,
+}
 // pub const TRICKLE_CHARGE_RESISTANCE_VALUE_3K: u8 = 0b00;
 // pub const TRICKLE_CHARGE_RESISTANCE_VALUE_5K: u8 = 0b01;
 // pub const TRICKLE_CHARGE_RESISTANCE_VALUE_9K: u8 = 0b10;
@@ -267,8 +273,25 @@ impl<I2C, E> RV3028<I2C>
   }
 
   /// Enable or disable trickle charging
-  pub fn toggle_trickle_charge(&mut self, enable: bool) -> Result<(), E>  {
-    self.set_or_clear_reg_bits(EEPROM_MIRROR_ADDRESS, TRICKLE_CHARGE_ENABLE_BIT, enable)
+  /// - `enable` enables trickle charging if true, disables if false
+  /// - `limit_resistance` Sets the current limiting resistor value: higher means less current
+  /// Disabling also resets the `limit_resistance` to 3 kΩ, the factory default.
+  /// Returns the status of trickle charging (true for enabled, false for disabled)
+  pub fn toggle_trickle_charge(&mut self, enable: bool,
+                               limit_resistance: TrickleChargeCurrentLimiter) -> Result<bool, E>  {
+    // First disable charging before changing settings
+    self.clear_reg_bits(EEPROM_MIRROR_ADDRESS,  TRICKLE_CHARGE_ENABLE_BIT)?;
+    // Reset TCR to 3 kΩ, the factory default, by clearing the TCR bits
+    self.clear_reg_bits(EEPROM_MIRROR_ADDRESS,  TRICKLE_CHARGE_RESISTANCE_BITS )?;
+
+    if enable {
+      self.set_reg_bits(EEPROM_MIRROR_ADDRESS, limit_resistance as u8)?;
+      self.set_reg_bits(EEPROM_MIRROR_ADDRESS, TRICKLE_CHARGE_ENABLE_BIT)?;
+    }
+
+    // confirm the value set
+    let conf_val = 0 != self.read_register(EEPROM_MIRROR_ADDRESS)? & TRICKLE_CHARGE_ENABLE_BIT;
+    Ok(conf_val)
   }
 
 
@@ -279,27 +302,45 @@ impl<I2C, E> RV3028<I2C>
   }
 
   // Set the bcd time tracking registers
+  // assumes `select_mux_channel` has already been called
   fn set_time(&mut self, time: &NaiveTime) -> Result<(), E> {
-    // TODO use multi-write
-    self.write_register(REG_HOURS, Self::bin_to_bcd(time.hour() as u8))?;
-    self.write_register(REG_MINUTES, Self::bin_to_bcd(time.minute() as u8))?;
-    self.write_register(REG_SECONDS, Self::bin_to_bcd(time.second() as u8))
+    let write_buf = [
+      REG_SECONDS, // select the first register
+      Self::bin_to_bcd(time.second() as u8 ),
+      Self::bin_to_bcd(time.minute() as u8 ),
+      Self::bin_to_bcd(time.hour() as u8 )
+    ];
+    self.i2c.write(RV3028_ADDRESS, &write_buf)
+
+    // self.write_register(REG_HOURS, Self::bin_to_bcd(time.hour() as u8))?;
+    // self.write_register(REG_MINUTES, Self::bin_to_bcd(time.minute() as u8))?;
+    // self.write_register(REG_SECONDS, Self::bin_to_bcd(time.second() as u8))
   }
 
 
-  // Set the date registers
-  // Note that only years from 2000 to 2099 are supported
+  // Set the internal BCD date registers.
+  // Note that only years from 2000 to 2099 are supported.
+  // Assumes `select_mux_channel` has already been called
   fn set_date(&mut self, date: &NaiveDate) -> Result<(), E> {
-    let year:u8 = if date.year() > 2000 { (date.year() - 2000) as u8} else {0};
+    let year = if date.year() > 2000 { (date.year() - 2000) as u8} else {0};
     let month = (date.month() % 13) as u8;
     let day = (date.day() % 32) as u8;
     let weekday = (date.weekday() as u8) % 7;
-    // TODO use multi write
-    self.write_register(REG_YEAR, Self::bin_to_bcd(year))?;
-    self.write_register(REG_MONTH, Self::bin_to_bcd(month))?;
-    self.write_register(REG_DATE, Self::bin_to_bcd(day))?;
-    self.write_register(REG_WEEKDAY, Self::bin_to_bcd(weekday))?;
-    Ok(())
+
+    let write_buf = [
+      REG_WEEKDAY, // select the first register
+      Self::bin_to_bcd(weekday ),
+      Self::bin_to_bcd(day ),
+      Self::bin_to_bcd(month ),
+      Self::bin_to_bcd(year )
+    ];
+    self.i2c.write(RV3028_ADDRESS, &write_buf)
+
+    // self.write_register(REG_WEEKDAY, Self::bin_to_bcd(weekday))?;
+    // self.write_register(REG_DATE, Self::bin_to_bcd(day))?;
+    // self.write_register(REG_MONTH, Self::bin_to_bcd(month))?;
+    // self.write_register(REG_YEAR, Self::bin_to_bcd(year))?;
+
   }
 
   /// Get the year, month, day from the internal BCD registers
@@ -325,14 +366,19 @@ impl<I2C, E> RV3028<I2C>
     self.i2c.write_read(RV3028_ADDRESS, &[reg], read_buf)
   }
 
-  /// Set just the Unix time counter. Note that this does NOT set other internal BCD registers
+  /// Set just the Unix time counter.
+  /// Prefer the `set_datetime` method to properly set all internal BCD registers.
+  /// Note:
+  /// - This does NOT set other internal BCD registers
   /// such as Year or Hour: if you want to set those as well, use the
-  /// set_datetime method instead.
+  /// `set_datetime` method instead.
+  /// - This does not reset the prescaler pipeline,
+  /// which means subseconds are not reset to zero.
+  ///
   pub fn set_unix_time(&mut self, unix_time: u32) -> Result<(), E> {
     self.select_mux_channel()?;
     let bytes = unix_time.to_le_bytes(); // Convert to little-endian byte array
     self.i2c.write(RV3028_ADDRESS, &[REG_UNIX_TIME_0, bytes[0], bytes[1], bytes[2], bytes[3]])
-    // TODO write reset to reset subsec counters?
   }
 
   /// Reads the value of the RTC's unix time counter, notionally seconds elapsed since the
@@ -546,7 +592,10 @@ impl<I2C, E> DateTimeAccess for  RV3028<I2C>
   /// This implementation assumes (but doesn't verify)
   /// that the caller is setting the RTC datetime to values within its range (from 2000 to 2099).
   /// The RTC doesn't support leap year corrections beyond 2099,
-  /// and the internal Year BCD register only runs from 0..99 (for 2000..2099)
+  /// and the internal Year BCD register only runs from 0..99 (for 2000..2099).
+  /// This method resets the internal prescaler pipeline, which means that
+  /// subsecond counters are zeroed, when it writes to the Seconds register.
+  /// This assists with clock synchronization with external clocks.
   fn set_datetime(&mut self, datetime: &NaiveDateTime) -> Result<(), Self::Error> {
     let unix_timestamp: u32 = datetime.timestamp().try_into().unwrap();
     // unix timestamp counter is stored in registers separate from everything else:
@@ -554,6 +603,8 @@ impl<I2C, E> DateTimeAccess for  RV3028<I2C>
     // used by eg the Event or Alarm interrupts
     self.set_unix_time(unix_timestamp)?;
     self.set_date(&datetime.date())?;
+    // this must come last because writing to the seconds register resets
+    // the upper stage of the prescaler
     self.set_time(&datetime.time())?;
     Ok(())
   }
