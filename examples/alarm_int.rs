@@ -6,8 +6,8 @@ use chrono::{Datelike, NaiveDateTime, Timelike, Utc, Weekday};
 use rv3028c7_rtc::{RV3028};
 use std::time::Duration;
 use std::thread::sleep;
-use linux_embedded_hal::{CdevPin, gpio_cdev::{Chip, LineRequestFlags}};
-use embedded_hal::digital::v2::{InputPin};
+// use linux_embedded_hal::{CdevPin, gpio_cdev::{Chip, LineRequestFlags}};
+// use embedded_hal::digital::v2::{InputPin};
 use rtcc::DateTimeAccess;
 
 use embedded_hal::blocking::i2c::{Write, Read, WriteRead};
@@ -73,12 +73,13 @@ fn run_iteration<I2C,E>(rtc: &mut RV3028<I2C>, alarm_dt: &NaiveDateTime,
 
 fn main() {
     // This is a specific configuration for Raspberry Pi -- YMMV
-    let mut gpiochip = Chip::new("/dev/gpiochip0").unwrap();
 
-    // Grab a GPIO input pin on the host for receiving INT signals from RTC
-    let int_line = gpiochip.get_line(27).unwrap();
-    let handle = int_line.request(LineRequestFlags::INPUT, 1, "gpio_int").unwrap();
-    let int_pin = CdevPin::new(handle).expect("new int_pin");
+    // let mut gpiochip = Chip::new("/dev/gpiochip0").unwrap();
+    //
+    // // Grab a GPIO input pin on the host for receiving INT signals from RTC
+    // let int_line = gpiochip.get_line(27).unwrap();
+    // let handle = int_line.request(LineRequestFlags::INPUT, 1, "gpio_int").unwrap();
+    // let int_pin = CdevPin::new(handle).expect("new int_pin");
 
     // Initialize the I2C device
     let i2c = I2cdev::new("/dev/i2c-1").expect("Failed to open I2C device");
@@ -100,7 +101,6 @@ fn main() {
     let (first_alarm_dt, _out_weekday, _out_match_day, _out_match_hour, _out_match_minute) =
       rtc.get_alarm_datetime_wday_matches().unwrap();
     println!("first_alarm_dt {} ", first_alarm_dt);
-
 
     let init_dt = rtc.datetime().unwrap();
     let alarm_dt = init_dt.add(Duration::from_secs(60));
@@ -127,7 +127,7 @@ fn main() {
     run_iteration(&mut rtc, &alarm_dt, Some(Weekday::Sun), false, true, false);
     run_iteration(&mut rtc, &alarm_dt, Some(Weekday::Mon), true, false, true);
 
-    println!("int pin low? {} ", int_pin.is_low().unwrap());
+    // println!("int pin low? {} ", int_pin.is_low().unwrap());
 
     // prep for alarm output on INT pin
     run_iteration(&mut rtc, &alarm_dt, Some(alarm_dt.weekday()),
@@ -136,8 +136,8 @@ fn main() {
     let cur_dt = rtc.datetime().unwrap();
     println!("wait for alarm to trigger..\r\n{} {}",cur_dt, alarm_dt);
 
-    let  last_low = int_pin.is_low().unwrap();
-    let  last_high = int_pin.is_high().unwrap();
+    // let  last_low = int_pin.is_low().unwrap();
+    // let  last_high = int_pin.is_high().unwrap();
     for _i in 0..10 {
         sleep(Duration::from_secs(10));
 
@@ -145,12 +145,12 @@ fn main() {
         let cur_dt = rtc.datetime().unwrap();
         println!("{} alarm flag: {}", cur_dt, alarm_af);
 
-        let pin_low = int_pin.is_low().unwrap();
-        let pin_high = int_pin.is_high().unwrap();
-        if pin_low != last_low || pin_high != last_high {
-            println!("pin high {} low {}", pin_high, pin_low);
-            break;
-        }
+        // let pin_low = int_pin.is_low().unwrap();
+        // let pin_high = int_pin.is_high().unwrap();
+        // if pin_low != last_low || pin_high != last_high {
+        //     println!("pin high {} low {}", pin_high, pin_low);
+        //     break;
+        // }
         if alarm_af { break; }
 
         if cur_dt.minute() >= alarm_dt.minute() {

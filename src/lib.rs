@@ -290,7 +290,8 @@ impl<I2C, E> RV3028<I2C>
     }
 
     // confirm the value set
-    let conf_val = 0 != self.read_register(EEPROM_MIRROR_ADDRESS)? & TRICKLE_CHARGE_ENABLE_BIT;
+    let conf_val =
+      0 != self.read_register(EEPROM_MIRROR_ADDRESS)? & TRICKLE_CHARGE_ENABLE_BIT;
     Ok(conf_val)
   }
 
