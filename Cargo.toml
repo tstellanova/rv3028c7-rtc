@@ -1,6 +1,6 @@
 [package]
 name = "rv3028c7-rtc"
-version = "0.3.1"
+version = "0.4.0"
 edition = "2021"
 authors = ["Todd Stellanova <tstellanova@users.noreply.github.com>"]
 license = "BSD-3-Clause"
@@ -13,12 +13,13 @@ categories = ["embedded", "hardware-support", "no-std"]
 [dependencies]
 embedded-hal = "0.2.7"
 rtcc = "0.3.0"
+chrono = {version = "0.4.31", default-features = false }
 
 [dev-dependencies]
 embedded-hal-mock = "0.9.0"
-chrono = "0.4.31"
 shared-bus = "0.3.1"
 ds323x="0.5.1"
+chrono = {version = "0.4.31", default-features = false, features = ["alloc","clock"] }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 linux-embedded-hal = "0.3.0"

@@ -3,12 +3,11 @@ extern crate rv3028c7_rtc;
 use core::convert::TryInto;
 use linux_embedded_hal::I2cdev;
 use chrono::{Utc};
-use rv3028c7_rtc::RV3028;
+use rv3028c7_rtc::{RV3028, DateTimeAccess};
 use std::time::{Duration };
 use std::thread::sleep;
 use ds323x::Ds323x;
-
-
+use embedded_hal::blocking::i2c::Write;
 
 /**
 Example comparing set/get of date and time for two different models of RTC,
