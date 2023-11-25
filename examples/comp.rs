@@ -2,7 +2,7 @@ extern crate rv3028c7_rtc;
 
 use core::convert::TryInto;
 use linux_embedded_hal::I2cdev;
-use chrono::{Utc};
+use chrono::{NaiveDateTime, Utc};
 use rv3028c7_rtc::{RV3028, DateTimeAccess};
 use std::time::{Duration };
 use std::thread::sleep;
@@ -65,7 +65,7 @@ fn main() {
     let sys_timestamp_64 = now.timestamp();
     let sys_timestamp_32:u32 = sys_timestamp_64.try_into().unwrap();
     let next_timestamp = sys_timestamp_32 + 1;
-    let next_datetime = ds323x::NaiveDateTime::from_timestamp_opt(next_timestamp.into(), 0).unwrap();
+    let next_datetime = NaiveDateTime::from_timestamp_opt(next_timestamp.into(), 0).unwrap();
     let now_timestamp_micros = now.timestamp_subsec_micros();
     let wait_micros:u64 = (1_000_000 - (now_timestamp_micros + 5)).into();
     let wait_duration = Duration::from_micros(wait_micros);
@@ -73,11 +73,11 @@ fn main() {
     sleep(wait_duration);
 
     // the following should fail if the mux or child devices don't respond
-    rv1.set_unix_time(next_timestamp).expect("couldn't set rtc1");
+    rv1.set_datetime(&next_datetime).unwrap();
     muxdev.write(MUX_I2C_ADDRESS, &[MUX_CHAN_TWO]).expect("mux ch2 i2c err");
     ds1.set_datetime(&next_datetime).unwrap();
 
-    rv2.set_unix_time(next_timestamp).expect("couldn't set rtc2");
+    rv2.set_datetime(&next_datetime).unwrap();
     muxdev.write(MUX_I2C_ADDRESS, &[MUX_CHAN_FOUR]).expect("mux ch4 i2c err");
     ds2.set_datetime(&next_datetime).unwrap();
 
@@ -95,11 +95,11 @@ fn main() {
     loop {
         let (sys_timestamp,  subsec_micros) = get_sys_timestamp_and_micros();
 
-        let rv1_out:i64 = rv1.get_unix_time().expect("couldn't get RV unix time").into();
+        let rv1_out:i64 = rv1.datetime().expect("couldn't get RV unix time").timestamp();
         muxdev.write(MUX_I2C_ADDRESS, &[MUX_CHAN_TWO]).expect("mux ch2 i2c err");
         let ds1_out = ds1.datetime().expect("couldn't get DS datetime ").timestamp();
 
-        let rv2_out:i64 = rv2.get_unix_time().expect("couldn't get RV unix time").into();
+        let rv2_out:i64 = rv2.datetime().expect("couldn't get RV unix time").timestamp();
         muxdev.write(MUX_I2C_ADDRESS, &[MUX_CHAN_FOUR]).expect("mux ch4 i2c err");
         let ds2_out = ds2.datetime().expect("couldn't get DS datetime").timestamp();
 
