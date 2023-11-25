@@ -3,6 +3,7 @@
 
 
 pub use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike, Weekday};
+use chrono::NaiveTime;
 pub use rtcc::{  DateTimeAccess };
 
 use embedded_hal::blocking::i2c::{Write, Read, WriteRead};
@@ -277,78 +278,36 @@ impl<I2C, E> RV3028<I2C>
     Ok(reg_val)
   }
 
-  /// Set time of day (hours, minutes, seconds) in binary format
-  pub fn set_time(&mut self, hours: u8, minutes: u8, seconds: u8) -> Result<(), E> {
-    self.write_register(REG_HOURS, Self::bin_to_bcd(hours))?;
-    self.write_register(REG_MINUTES, Self::bin_to_bcd(minutes))?;
-    self.write_register(REG_SECONDS, Self::bin_to_bcd(seconds))
+  // Set the bcd time tracking registers
+  fn set_time(&mut self, time: &NaiveTime) -> Result<(), E> {
+    // TODO use multi-write
+    self.write_register(REG_HOURS, Self::bin_to_bcd(time.hour() as u8))?;
+    self.write_register(REG_MINUTES, Self::bin_to_bcd(time.minute() as u8))?;
+    self.write_register(REG_SECONDS, Self::bin_to_bcd(time.second() as u8))
   }
 
-  /// Get time of day in binary format (hours, minutes, seconds)
-  pub fn get_time(&mut self) -> Result<(u8, u8, u8), E> {
-    let hours = Self::bcd_to_bin(self.read_register(REG_HOURS)?);
-    let minutes = Self::bcd_to_bin(self.read_register(REG_MINUTES)?);
-    let seconds = Self::bcd_to_bin(self.read_register(REG_SECONDS)?);
-    Ok((hours, minutes, seconds))
-  }
 
-  /// Set the weekday (day of week, 0..6)
-  pub fn set_weekday(&mut self, weekday: u8) -> Result<(), E> {
-    self.write_register(REG_WEEKDAY, Self::bin_to_bcd(weekday))
-  }
-
-  /// Get the weekday (day of week, 0..6)
-  pub fn get_weekday(&mut self) -> Result<u8, E> {
-    let bcd = self.read_register(REG_WEEKDAY)?;
-    Ok(Self::bcd_to_bin(bcd))
-  }
-
-  /// Set the calendar year, month, day. Year is 0..99  (for 2000 to 2099)
-  pub fn set_year_month_day(&mut self, year: u8, month: u8, day: u8) -> Result<(), E> {
+  // Set the date registers
+  // Note that only years from 2000 to 2099 are supported
+  fn set_date(&mut self, date: &NaiveDate) -> Result<(), E> {
+    let year:u8 = if date.year() > 2000 { (date.year() - 2000) as u8} else {0};
+    let month = (date.month() % 13) as u8;
+    let day = (date.day() % 32) as u8;
+    let weekday = (date.weekday() as u8) % 7;
+    // TODO use multi write
     self.write_register(REG_YEAR, Self::bin_to_bcd(year))?;
     self.write_register(REG_MONTH, Self::bin_to_bcd(month))?;
-    self.write_register(REG_DATE, Self::bin_to_bcd(day))
+    self.write_register(REG_DATE, Self::bin_to_bcd(day))?;
+    self.write_register(REG_WEEKDAY, Self::bin_to_bcd(weekday))?;
+    Ok(())
   }
 
-  /// Set the calendar date (day number of month) (1..31)
-  pub fn set_date(&mut self, date: u8) -> Result<(), E> {
-    self.write_register(REG_DATE, Self::bin_to_bcd(date))
-  }
-
-  /// Get the calendar date (day number of month) (1..31)
-  pub fn get_date(&mut self) -> Result<u8, E> {
-    let bcd = self.read_register(REG_DATE)?;
-    Ok(Self::bcd_to_bin(bcd))
-  }
-
-  /// Set the calendar month (1..12)
-  pub fn set_month(&mut self, month: u8) -> Result<(), E> {
-    self.write_register(REG_MONTH, Self::bin_to_bcd(month))
-  }
-
-  /// Get the calendar month (1..12)
-  pub fn get_month(&mut self) -> Result<u8, E> {
-    let bcd = self.read_register(REG_MONTH)?;
-    Ok(Self::bcd_to_bin(bcd))
-  }
-
-  /// Set the calendar year (1..12)
-  pub fn set_year(&mut self, year: u8) -> Result<(), E> {
-    self.write_register(REG_YEAR, Self::bin_to_bcd(year))
-  }
-
-  /// Get the calendar year (00..99 for 2000..2099)
-  pub fn get_year(&mut self) -> Result<u8, E> {
-    let bcd = self.read_register(REG_YEAR)?;
-    Ok(Self::bcd_to_bin(bcd))
-  }
-
-  /// Set the calendar year, month, day
-  pub fn get_year_month_day(&mut self) -> Result<(u8, u8, u8), E> {
-    let year = self.get_year()?;
-    let month = self.get_month()?;
-    let day = self.get_date()?;
-    Ok((year,month,day))
+  pub fn get_ymd(&mut self) -> Result<(i32, u8, u8), E> {
+    // TODO use read_multi_registers
+    let year: i32 = Self::bcd_to_bin( self.read_register(REG_YEAR)? ) as i32 + 2000;
+    let month = Self::bcd_to_bin(self.read_register(REG_MONTH)?);
+    let day = Self::bcd_to_bin(self.read_register(REG_DATE)?);
+    Ok((year, month, day))
   }
 
   // read a block of registers all at once
@@ -357,7 +316,9 @@ impl<I2C, E> RV3028<I2C>
     self.i2c.write_read(RV3028_ADDRESS, &[reg], read_buf)
   }
 
-  /// Set the Unix time counter
+  /// Set just the Unix time counter. Note that this does NOT set other registers
+  /// such as Year or Hour: if you want to set those as well, use the
+  /// set_datetime method instead.
   pub fn set_unix_time(&mut self, unix_time: u32) -> Result<(), E> {
     self.select_mux_channel()?;
     let bytes = unix_time.to_le_bytes(); // Convert to little-endian byte array
@@ -403,6 +364,16 @@ impl<I2C, E> RV3028<I2C>
     self.set_or_clear_reg_bits(REG_CONTROL2, ALARM_INT_ENABLE_BIT, enable)
   }
 
+  /// Toggle whether interrupt signal is generated on the INT pin:
+  /// - when an External Event on EVI pin occurs and TSS = 0
+  /// - or when an Automatic Backup Switchover occurs and TSS = 1.
+  /// The signal on the INT pin is retained until the EVF flag is cleared
+  /// to 0 (no automatic cancellation)
+  pub fn toggle_event_interrupt_out(&mut self, enable: bool) -> Result<(), E> {
+    self.set_or_clear_reg_bits(REG_CONTROL2, EVENT_INT_ENABLE_BIT, enable)
+  }
+
+
   /// Check the alarm status, and if it's triggered, clear it
   /// return bool indicating whether the alarm triggered
   pub fn check_and_clear_alarm(&mut self) -> Result<bool, E> {
@@ -434,16 +405,10 @@ impl<I2C, E> RV3028<I2C>
     // 3. Write the desired alarm settings in registers 07h to 09h. The three alarm enable bits, AE_M, AE_H and
     // AE_WD, are used to select the corresponding register that has to be taken into account for match or not.
     // See the following table.
-    // 4. Set CAIE bit to 1 to enable clock output when an alarm occurs. See also CLOCK OUTPUT SCHEME.
-    // 5. Set the AIE bit to 1 if you want to get a hardware interrupt on INT̅ ̅ ̅ ̅ ̅
-    // pin.
 
-    if weekday.is_some() {  // Clear WADA for weekday alarm
-      self.clear_reg_bits(REG_CONTROL1, WADA_BIT)?;
-    }
-    else {
-      self.set_reg_bits(REG_CONTROL1, WADA_BIT)?;
-    }
+
+    // Clear WADA for weekday alarm, or set for date alarm
+    self.set_or_clear_reg_bits(REG_CONTROL1, WADA_BIT, !weekday.is_some())?;
 
     let bcd_minute = Self::bin_to_bcd(datetime.time().minute() as u8);
     self.write_register(REG_MINUTES_ALARM,
@@ -455,7 +420,7 @@ impl<I2C, E> RV3028<I2C>
                         if match_hour { bcd_hour  }
                         else { ALARM_NO_WATCH_FLAG | bcd_hour })?;
 
-    if let Some(inner_weekday) = weekday { // Clear WADA for weekday alarm
+    if let Some(inner_weekday) = weekday {
       let bcd_weekday = Self::bin_to_bcd(inner_weekday as u8);
       self.write_register(REG_WEEKDAY_DATE_ALARM,
                           if match_day { bcd_weekday }
@@ -542,7 +507,7 @@ pub trait EventTimeStampLogger {
 
   /// Get event count -- the number of events that have been logged since enabling logging
   /// Returns the count of events since last reset, and the datetime of one event
-  fn get_event_count_and_datetime(&mut self) -> Result<(u32, NaiveDateTime), Self::Error>;
+  fn get_event_count_and_datetime(&mut self) -> Result<(u32, Option<NaiveDateTime>), Self::Error>;
 
   /// Enable or disable event time stamp overwriting
   /// If this is disabled (default), the first event time stamp is saved.
@@ -574,7 +539,13 @@ impl<I2C, E> DateTimeAccess for  RV3028<I2C>
   /// leap year corrections beyond 2099.
   fn set_datetime(&mut self, datetime: &NaiveDateTime) -> Result<(), Self::Error> {
     let unix_timestamp: u32 = datetime.timestamp().try_into().unwrap();
-    self.set_unix_time(unix_timestamp)
+    // unix timestamp counter is stored in registers separate from everything else:
+    // this method tries to align both, because the unix timestamp is not
+    // used by eg the Event or Alarm interrupts
+    self.set_unix_time(unix_timestamp)?;
+    self.set_date(&datetime.date())?;
+    self.set_time(&datetime.time())?;
+    Ok(())
   }
 
 }
@@ -588,17 +559,16 @@ impl<I2C, E> EventTimeStampLogger for  RV3028<I2C>
   fn toggle_event_log(&mut self, enable: bool) -> Result<(), Self::Error> {
     if enable {
       // App notes recommend first disabling the event log with TSE and setting TSR
-      // Initialize bits TSE and EIE to 0.
+      // 1. Initialize bits TSE and EIE to 0.
       // 2. Select TSOW (0 or 1), clear EVF and BSF.
       // 3. Write 1 to TSR bit, to reset all Time Stamp registers to 00h. Bit TSR always returns 0 when read.
       // 4. Select the External Event Interrupt function (TSS = 0) or the Automatic Backup Switchover Interrupt
-      // function (TSS = 1) as time stamp source and initialize the appropriate function (see EXTERNAL EVENT
-      //                                                                                  INTERRUPT FUNCTION or AUTOMATIC BACKUP SWITCHOVER INTERRUPT FUNCTION).
-      //   5. Set the TSE bit to 1 to enable the Time Stamp function.
+      // function (TSS = 1) as time stamp source and initialize the appropriate function
+      // (see EXTERNAL EVENT INTERRUPT FUNCTION or AUTOMATIC BACKUP SWITCHOVER INTERRUPT FUNCTION).
+      // 5. Set the TSE bit to 1 to enable the Time Stamp function.
 
       // Initialize bits TSE and EIE to 0.
       self.clear_reg_bits(REG_CONTROL2, TIME_STAMP_ENABLE_BIT)?;
-      self.clear_reg_bits(REG_CONTROL2, EVENT_INT_ENABLE_BIT)?;
       // Assume that TSOW has already been selected
       // Clear the single event detect flag EVF and BSF
       self.clear_reg_bits(REG_STATUS, EVENT_FLAG_BIT)?;
@@ -615,7 +585,7 @@ impl<I2C, E> EventTimeStampLogger for  RV3028<I2C>
     }
   }
 
-  fn get_event_count_and_datetime(&mut self) -> Result<(u32, NaiveDateTime), Self::Error> {
+  fn get_event_count_and_datetime(&mut self) -> Result<(u32, Option<NaiveDateTime>), Self::Error> {
     // Read the seven raw Time Stamp Function registers in one go
     let mut read_buf:[u8;7] = [0u8;7];
     self.read_multi_registers(REG_COUNT_EVENTS_TS, &mut read_buf)?;
@@ -623,26 +593,25 @@ impl<I2C, E> EventTimeStampLogger for  RV3028<I2C>
     // Convert BCD values to binary
     let count = read_buf[0]; // Count is already in binary
 
-    let dt = {
+    let odt = {
       if count > 0 {
         let seconds = Self::bcd_to_bin(read_buf[1]);
         let minutes = Self::bcd_to_bin(read_buf[2]);
         let hours = Self::bcd_to_bin(read_buf[3]);
         let date = Self::bcd_to_bin(read_buf[4]);
         let month = Self::bcd_to_bin(read_buf[5]);
-        let year = Self::bcd_to_bin(read_buf[6]);
-        NaiveDate::from_ymd_opt(year as i32, month as u32, date as u32)
+        let year:i32 = Self::bcd_to_bin(read_buf[6]) as i32 + 2000;
+        Some(NaiveDate::from_ymd_opt(year as i32, month as u32, date as u32)
         .expect("YMD")
           .and_hms_opt(hours as u32, minutes as u32, seconds as u32)
-          .expect("HMS")
+          .expect("HMS"))
       }
       else {
-        NaiveDateTime::from_timestamp_opt(0,0).unwrap()
+        None
       }
     };
 
-
-    Ok((count.into(), dt))
+    Ok((count.into(), odt))
   }
 
   fn toggle_time_stamp_overwrite(&mut self, enable: bool) -> Result<(), Self::Error> {
@@ -662,45 +631,7 @@ mod tests {
   use embedded_hal_mock::i2c::{Mock as I2cMock, Transaction as I2cTrans};
   use std::vec;
 
-  #[test]
-  fn test_set_time() {
-    let expectations = [
-      I2cTrans::write(RV3028_ADDRESS, vec![REG_HOURS, RV3028::<I2cMock>::bin_to_bcd(23)]),
-      I2cTrans::write(RV3028_ADDRESS, vec![REG_MINUTES, RV3028::<I2cMock>::bin_to_bcd(59)]),
-      I2cTrans::write(RV3028_ADDRESS, vec![REG_SECONDS, RV3028::<I2cMock>::bin_to_bcd(58)]),
-    ];
-    let mock = I2cMock::new(&expectations);
-    let mut rv3028 = RV3028::new(mock);
-    rv3028.set_time(23, 59, 58).unwrap();
-  }
 
-  #[test]
-  fn test_get_time() {
-    let expectations = [
-      I2cTrans::write_read(RV3028_ADDRESS, vec![REG_HOURS], vec![RV3028::<I2cMock>::bin_to_bcd(23)]),
-      I2cTrans::write_read(RV3028_ADDRESS, vec![REG_MINUTES], vec![RV3028::<I2cMock>::bin_to_bcd(59)]),
-      I2cTrans::write_read(RV3028_ADDRESS, vec![REG_SECONDS], vec![RV3028::<I2cMock>::bin_to_bcd(58)]),
-    ];
-    let mock = I2cMock::new(&expectations);
-    let mut rv3028 = RV3028::new(mock);
-    let (hours, minutes, seconds) = rv3028.get_time().unwrap();
-    assert_eq!(hours, 23);
-    assert_eq!(minutes, 59);
-    assert_eq!(seconds, 58);
-  }
-
-
-  #[test]
-  fn test_set_year_month_day() {
-    let expectations = [
-      I2cTrans::write(RV3028_ADDRESS, vec![REG_YEAR, RV3028::<I2cMock>::bin_to_bcd(23)]),
-      I2cTrans::write(RV3028_ADDRESS, vec![REG_MONTH, RV3028::<I2cMock>::bin_to_bcd(12)]),
-      I2cTrans::write(RV3028_ADDRESS, vec![REG_DATE, RV3028::<I2cMock>::bin_to_bcd(31)]),
-    ];
-    let mock = I2cMock::new(&expectations);
-    let mut rv3028 = RV3028::new(mock);
-    rv3028.set_year_month_day(23, 12, 31).unwrap();
-  }
 
 
   #[test]

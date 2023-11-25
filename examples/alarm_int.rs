@@ -21,10 +21,10 @@ use embedded_hal::blocking::i2c::{Write, Read, WriteRead};
 /// - SDA, SCL, GND, and 3.3V pins from rpi to the RTC
 /// - GPIO 27 (physical pin 13) from rpi to the INT pin of the RTC
 
-fn get_sys_timestamp() -> u32 {
+fn get_sys_timestamp() -> (NaiveDateTime, u32) {
     let now = Utc::now();
     let now_timestamp = now.timestamp();
-    now_timestamp.try_into().unwrap()
+    (now.naive_utc(), now_timestamp.try_into().unwrap() )
 }
 
 // run through a single iteration of alarm set, and verify the value is set
@@ -85,10 +85,14 @@ fn main() {
     // Create a new instance of the RV3028 driver
     let mut rtc = RV3028::new(i2c);
 
-    let sys_unix_timestamp = get_sys_timestamp();
-    rtc.set_unix_time(sys_unix_timestamp).expect("set_unix_time");
-    let rtc_unix_time = rtc.get_unix_time().expect("couldn't get unix time");
-    println!("start sys {} rtc {} ", sys_unix_timestamp, rtc_unix_time);
+    let (sys_datetime, sys_unix_timestamp) = get_sys_timestamp();
+    // use the set_datetime method to ensure all the timekeeping registers on
+    // the rtc are aligned to the same values
+    rtc.set_datetime(&sys_datetime).unwrap();
+    let rtc_unix_time = rtc.get_unix_time().unwrap();
+    // verify that the individual year, month, day registers are set correctly
+    let (year, month, day) = rtc.get_ymd().unwrap();
+    println!("start sys {} rtc {} ymd {} {} {} ", sys_unix_timestamp, rtc_unix_time, year,month,day);
 
     // disable alarm interrupts to begin with
     rtc.toggle_alarm_int_enable(false).unwrap();
@@ -98,7 +102,7 @@ fn main() {
     println!("first_alarm_dt {} ", first_alarm_dt);
 
 
-    let init_dt = rtc.datetime().expect("datetime");
+    let init_dt = rtc.datetime().unwrap();
     let alarm_dt = init_dt.add(Duration::from_secs(60));
     println!("init_dt:  {}", init_dt);
     println!("alarm_dt: {}", alarm_dt);
