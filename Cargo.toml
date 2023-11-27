@@ -23,6 +23,5 @@ chrono = {version = "0.4.31", default-features = false, features = ["alloc","clo
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 linux-embedded-hal = "0.3.0"
-
-
+gpiocdev = "0.6.1"
 

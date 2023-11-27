@@ -57,7 +57,7 @@ const MUX_CHAN_SEVEN:u8 = 0b1000_0000 ; // channel 7, MSB
 const MUX_CHAN_TWO:u8 = 0b0000_0100 ; // channel 2 
 const MUX_CHAN_FOUR:u8 = 0b0001_0000 ; // channel 4
 
-const IDEAL_RELOAD_US: u32 = 4880; // time it takes to set all RTCs and recheck sys time
+const IDEAL_RELOAD_US: u32 = 4866; // time it takes to set all RTCs and recheck sys time
 const IDEAL_DELAY_US_LOW: u32 = 1_000_000 - IDEAL_RELOAD_US;
 const IDEAL_DELAY_US_HIGH: u32 = IDEAL_DELAY_US_LOW + 100;
 const IDEAL_HALF_DELAY_US: u32 = IDEAL_RELOAD_US/2;

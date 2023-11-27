@@ -6,11 +6,11 @@ use chrono::{Datelike, NaiveDateTime, Timelike, Utc, Weekday};
 use rv3028c7_rtc::{RV3028};
 use std::time::Duration;
 use std::thread::sleep;
-// use linux_embedded_hal::{CdevPin, gpio_cdev::{Chip, LineRequestFlags}};
-// use embedded_hal::digital::v2::{InputPin};
 use rtcc::DateTimeAccess;
 
 use embedded_hal::blocking::i2c::{Write, Read, WriteRead};
+// use direct linux gpio access using cdev rather than via constrained embedded_hal methods
+use gpiocdev::{ line::{Bias, EdgeDetection} };
 
 /// Example testing real RTC interaction for alarm set/get,
 /// assuming linux environment (such as Raspberry Pi 3+)
@@ -74,10 +74,18 @@ fn run_iteration<I2C,E>(rtc: &mut RV3028<I2C>, alarm_dt: &NaiveDateTime,
 fn main() {
     // This is a specific configuration for Raspberry Pi -- YMMV
 
+    let gpio_int_req = gpiocdev::Request::builder()
+      .on_chip("/dev/gpiochip0")
+      .with_line(27)
+      .with_bias(Bias::PullUp) // INT pulls down briefly when triggered
+      .with_edge_detection(EdgeDetection::FallingEdge)
+      // .with_debounce_period(Duration::from_micros(5))
+      .request().unwrap();
+
     // let mut gpiochip = Chip::new("/dev/gpiochip0").unwrap();
-    //
     // // Grab a GPIO input pin on the host for receiving INT signals from RTC
     // let int_line = gpiochip.get_line(27).unwrap();
+    // //.with_edge_detection(gpiocdev::line::EdgeDetection::BothEdges)
     // let handle = int_line.request(LineRequestFlags::INPUT, 1, "gpio_int").unwrap();
     // let int_pin = CdevPin::new(handle).expect("new int_pin");
 
@@ -127,7 +135,6 @@ fn main() {
     run_iteration(&mut rtc, &alarm_dt, Some(Weekday::Sun), false, true, false);
     run_iteration(&mut rtc, &alarm_dt, Some(Weekday::Mon), true, false, true);
 
-    // println!("int pin low? {} ", int_pin.is_low().unwrap());
 
     // prep for alarm output on INT pin
     run_iteration(&mut rtc, &alarm_dt, Some(alarm_dt.weekday()),
@@ -136,8 +143,7 @@ fn main() {
     let cur_dt = rtc.datetime().unwrap();
     println!("wait for alarm to trigger..\r\n{} {}",cur_dt, alarm_dt);
 
-    // let  last_low = int_pin.is_low().unwrap();
-    // let  last_high = int_pin.is_high().unwrap();
+
     for _i in 0..10 {
         sleep(Duration::from_secs(10));
 
@@ -145,13 +151,20 @@ fn main() {
         let cur_dt = rtc.datetime().unwrap();
         println!("{} alarm flag: {}", cur_dt, alarm_af);
 
-        // let pin_low = int_pin.is_low().unwrap();
-        // let pin_high = int_pin.is_high().unwrap();
-        // if pin_low != last_low || pin_high != last_high {
-        //     println!("pin high {} low {}", pin_high, pin_low);
-        //     break;
-        // }
-        if alarm_af { break; }
+        if gpio_int_req.has_edge_event().unwrap() {
+            println!("have INT edge_events!", );
+            for edge_event in gpio_int_req.edge_events() {
+                if let Ok(inner_evt) = edge_event {
+                    println!("{} INT event: {:?}",
+                             inner_evt.timestamp_ns, inner_evt);
+                }
+            }
+        }
+
+        if alarm_af {
+            // If we saw edge events, this should also be true
+            break;
+        }
 
         if cur_dt.minute() >= alarm_dt.minute() {
             break;
