@@ -33,13 +33,11 @@ const REG_DATE: u8 = 0x04;
 const REG_MONTH: u8 = 0x05;
 const REG_YEAR: u8 = 0x06;
 
-
 // Holds the Minutes Alarm Enable bit AE_M,
 // and the alarm value for minutes,
 // in two binary coded decimal (BCD) digits.
 // Values will range from 00 to 59.
 const REG_MINUTES_ALARM: u8 = 0x07;
-
 
 // Holds the Hours Alarm Enable bit AE_H and the alarm value for hours,
 // in two binary coded decimal (BCD) digits.
@@ -59,8 +57,22 @@ const REG_HOURS_ALARM: u8 = 0x08;
 // digits. Values will range from 01 to 31.
 const REG_WEEKDAY_DATE_ALARM: u8 = 0x09;
 
-// 0Ah – Timer Value 0
-// 0Bh – Timer Value 1
+// This register is used to set the lower 8 bits of the 12 bit Timer Value (preset value)
+// for the Periodic Countdown Timer.
+// This value will be automatically reloaded into the Countdown Timer when it reaches zero
+// If the TRPT bit is 1, this value will be automatically reloaded into the Countdown Timer
+// when it reaches zero: this allows for periodic timer interrupts
+const REG_TIMER_VALUE1: u8 = 0x0A;
+
+// This register is used to set the upper 4 bits of the 12 bit Timer Value (preset value)
+// for the Periodic Countdown Timer.
+// If the TRPT bit is 1, this value will be automatically reloaded into the Countdown Timer
+// when it reaches zero: this allows for periodic timer interrupts
+const REG_TIMER_VALUE2: u8 = 0x0B;
+
+const REG_TIMER_STATUS0: u8 = 0x0C; // Read-only lower 8 bits of Periodic Countdown Timer
+const REG_TIMER_STATUS1: u8 = 0x0D; // Read-only upper 4 bits of Periodic Countdown Timer
+
 
 // This register is used to detect the occurrence of various interrupt events
 // and reliability problems in internal data.
@@ -99,17 +111,31 @@ const REG_UNIX_TIME_0: u8 = 0x1B;
 // const REG_UNIX_TIME_3: u8 = 0x1E;
 
 // REG_CONTROL1 "Control 1" register bits:
-const WADA_BIT: u8 = 1 << 5; // Weekday Alarm / Date Alarm selection bit WADA
+const TIMER_REPEAT_BIT: u8 = 1 << 7;// TRPT / Timer Repeat bit. Single or Repeat countdown timer
+const WADA_BIT: u8 = 1 << 5; // WADA / Weekday Alarm / Date Alarm selection bit
 // const USEL_BIT: u8 = 1 << 4;
 // const EERD_BIT: u8 = 1 << 3;
+const TIMER_ENABLE_BIT: u8 = 1 << 2; // TE / Periodic Countdown Timer Enable bit.
+const TIMER_CLOCK_FREQ_BITS: u8 = 0b11; // Timer Clock Frequency selection bits
 
+/// Countown timer clock frequency selector
+#[derive(Clone, Copy)]
+pub enum TimerClockFreq {
+  Hertz4096 = 0b00, // 244.14 μs period
+  Hertz64 = 0b01, // 15.625 ms period
+  Hertz1 = 0b10, // One second period
+  HertzSixtieth = 0b11, // 1/60 Hz, One minute period
+}
 
 // REG_STATUS Status register bits:
 // const EEBUSY_BIT: u8 = 1 << 7;
 const CLOCK_INT_FLAG_BIT: u8 = 1 << 6; // CLKF  / Clock Output Interrupt Flag
 const BACKUP_SWITCH_FLAG: u8 = 1 << 4; // BSF bit
+const PERIODIC_TIMER_FLAG: u8 = 1 << 3; // TF bit / Periodic Countdown Timer Flag
 const ALARM_FLAG_BIT : u8 = 1 << 2; // AF / Alarm Flag
-const EVENT_FLAG_BIT: u8 = 1 << 1; // EVF / Event Flag
+const EVENT_FLAG_BIT: u8 = 1 << 1; // EVF / Event Flag (external event interrupt)
+
+
 
 // EEPROM register addresses and commands
 const EEPROM_MIRROR_ADDRESS: u8 = 0x37;// RAM mirror of EEPROM config values
@@ -140,12 +166,16 @@ const TRICKLE_CHARGE_ENABLE_BIT: u8 = 1 << 5; // TCE bit
 
 
 const TRICKLE_CHARGE_RESISTANCE_BITS: u8 = 0b11; // TCR bits
+#[derive(Clone, Copy)]
 pub enum TrickleChargeCurrentLimiter {
   Ohms3k = 0b00,
   Ohms5k = 0b01,
   Ohms9k = 0b10,
   Ohms15k = 0b11,
 }
+
+// REG_TIMER_VALUE1 bits
+// REG_TIMER_VALUE2 bits
 
 
 // Special alarm register value
@@ -568,7 +598,41 @@ impl<I2C, E> RV3028<I2C>
     self.clear_reg_bits(REG_STATUS, CLOCK_INT_FLAG_BIT)?;
     self.set_or_clear_reg_bits(EEPROM_MIRROR_ADDRESS, CLOCK_OUT_ENABLE_BIT, enable)
   }
-  //CLKOE
+
+  ///
+  pub fn configure_countdown_timer(&mut self, value: u16, freq: TimerClockFreq)  -> Result<(), E> {
+    let value_low: u8 = (value & 0xFF) as u8;
+    let value_high: u8 = ((value >> 8) as u8) & 0x0F;
+    self.set_reg_bits(REG_TIMER_VALUE1, value_low)?;
+    self.set_reg_bits(REG_TIMER_VALUE2, value_high)?;
+
+    // configure the timer clock source / period
+    self.clear_reg_bits(REG_CONTROL1, TIMER_CLOCK_FREQ_BITS)?;
+    self.set_reg_bits(REG_CONTROL1, freq as u8)?;
+
+    Ok(())
+  }
+
+  /// Set whether the Periodic Countdown Timer mode is repeating (periodic) or one-shot.
+  /// - `enable`: If true, starts the timer countdown. If false, stops the timer.
+  /// - `repeat`: If true, the countdown timer will repeat as a periodic timer.
+  /// If false, the countdown timer will only run once ("one-shot" mode).
+  pub fn toggle_countdown_timer(&mut self, enable: bool, repeat: bool)  -> Result<(), E> {
+    self.clear_reg_bits(REG_STATUS, PERIODIC_TIMER_FLAG);
+    self.set_or_clear_reg_bits(REG_CONTROL1, TIMER_REPEAT_BIT, repeat)?;
+    self.set_or_clear_reg_bits(REG_CONTROL1, TIMER_ENABLE_BIT, enable)
+  }
+
+  /// Check whether countdown timer has finished counting down
+  pub fn check_and_clear_countdown(&mut self) -> Result<bool, E> {
+    let reg_val = self.read_register(REG_STATUS)?;
+    let flag_set =  0 != (reg_val & PERIODIC_TIMER_FLAG); // Check if the TF flag is set
+    if flag_set {
+      self.clear_reg_bits(REG_STATUS, PERIODIC_TIMER_FLAG)?;
+    }
+    Ok(flag_set)
+  }
+
 
 }
 
@@ -634,7 +698,6 @@ impl<I2C, E> EventTimeStampLogger for  RV3028<I2C>
     I2C: Write<Error = E> + Read<Error = E> + WriteRead<Error = E>
 {
   type Error = E;
-
 
   fn toggle_event_log(&mut self, enable: bool) -> Result<(), Self::Error> {
     if enable {
