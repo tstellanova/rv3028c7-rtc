@@ -5,12 +5,11 @@ use linux_embedded_hal::I2cdev;
 use chrono::{Datelike, NaiveDateTime, Timelike, Utc, Weekday};
 use rv3028c7_rtc::{RV3028};
 use std::time::Duration;
-use std::thread::sleep;
 use rtcc::DateTimeAccess;
 
 use embedded_hal::blocking::i2c::{Write, Read, WriteRead};
 // use direct linux gpio access using cdev rather than via constrained embedded_hal methods
-use gpiocdev::{ line::{Bias, EdgeDetection} };
+use gpiocdev::{ line::{EdgeDetection} };
 
 /// Example testing real RTC interaction for alarm set/get,
 /// assuming linux environment (such as Raspberry Pi 3+)
@@ -84,25 +83,15 @@ const MUX_I2C_ADDRESS: u8 = 0x70;
 const MUX_CHAN_FIRST:u8 = 0b0000_0001 ; //channel 0, LSB
 const MUX_CHAN_SECOND:u8 = 0b1000_0000 ; // channel 7, MSB
 
-fn main() {
-    // This is a specific configuration for Raspberry Pi -- YMMV
 
-    let gpio_int_req = gpiocdev::Request::builder()
-      .on_chip("/dev/gpiochip0")
-      .with_line(17)
-      // .as_active_low()
-      .with_bias(Bias::PullUp) // INT pulls down briefly when triggered
-      // .with_edge_detection(EdgeDetection::BothEdges)
-      .with_edge_detection(EdgeDetection::FallingEdge)
-      // beware -- the debounce filter can easily cause interrupts to be missed
-      // .with_debounce_period(Duration::from_micros(1))
-      .request().unwrap();
+fn main() {
 
     // Initialize the I2C device
     let i2c = I2cdev::new("/dev/i2c-1").expect("Failed to open I2C device");
     // Create a new instance of the RV3028 driver
     // let mut rtc = RV3028::new(i2c);
-    let mut rtc = RV3028::new_with_mux(i2c, MUX_I2C_ADDRESS, MUX_CHAN_FIRST);
+    let mut rtc =
+      RV3028::new_with_mux(i2c, MUX_I2C_ADDRESS, MUX_CHAN_SECOND);
 
     let (sys_datetime, sys_unix_timestamp) = get_sys_timestamp();
     // use the set_datetime method to ensure all the timekeeping registers on
@@ -145,47 +134,48 @@ fn main() {
     verify_alarm_set(&mut rtc, &alarm_dt, Some(Weekday::Sun), false, true, false);
     verify_alarm_set(&mut rtc, &alarm_dt, Some(Weekday::Mon), true, false, true);
 
-
     // Now, prep for alarm output on INT pin in (less than) 60 seconds
     let _ = rtc.clear_all_int_out_bits();
+
+    // This is a specific configuration for Raspberry Pi -- YMMV
+    let gpio_int_req = gpiocdev::Request::builder()
+      .on_chip("/dev/gpiochip0")
+      .with_line(17)
+      .with_line(27)
+      // this pin is "active" when it is low, because we've attached a pull-up resistor of 2.2k
+      .as_active_low()
+      // PullUp bias doesn't appear to work on Rpi3
+      // .with_bias(Bias::PullUp) // INT pulls down briefly when triggered
+      .with_edge_detection(EdgeDetection::FallingEdge)
+      // the debounce filter doesn't appear to work on Rpi3
+      // .with_debounce_period(Duration::from_micros(1))
+      .request().unwrap();
+
     verify_alarm_set(&mut rtc, &alarm_dt, None,
                      false, false, true);
-    let cur_dt = rtc.datetime().unwrap();
-    println!("{} flush old edge events", cur_dt);
-    dump_edge_events(&gpio_int_req);
 
-    println!("0 is_active: {}",gpio_int_req.value(17).unwrap());
+    if let Ok(true) = gpio_int_req.has_edge_event() {
+        println!("dump stale edge events");
+        dump_edge_events(&gpio_int_req);
+    }
+
+    let cur_dt = rtc.datetime().unwrap();
     rtc.toggle_alarm_int_enable(true).unwrap();
     println!("wait for alarm to trigger..\r\n{} -> {}",cur_dt, alarm_dt);
-    println!("1 is_active: {}",gpio_int_req.value(17).unwrap());
 
     for _i in 0..10 {
-        sleep(Duration::from_secs(10));
-        let cur_dt = rtc.datetime().unwrap();
-        println!("2 is_active: {}",gpio_int_req.value(17).unwrap());
-
-        // if let Ok(true) = gpio_int_req.has_edge_event() {
-        //     println!("Edge events at {}",cur_dt);
-        //     dump_edge_events(&gpio_int_req);
-        // }
-
-        // if let Ok(true) = gpio_int_req.wait_edge_event(Duration::from_secs(10)) {
-        //     let cur_dt = rtc.datetime().unwrap();
-        //     println!("Edge events at {}",cur_dt);
-        //     dump_edge_events(&gpio_int_req);
-        // }
-        // else {
-        //     let cur_dt = rtc.datetime().unwrap();
-        //     println!("No edge events at {}",cur_dt);
-        //     continue;
-        // }
-
-        let alarm_af = rtc.check_and_clear_alarm().unwrap();
-        println!("{} alarm flag: {}", cur_dt, alarm_af);
-        if let Ok(true) = gpio_int_req.has_edge_event() {
+        if let Ok(true) = gpio_int_req.wait_edge_event(Duration::from_secs(10)) {
+            let cur_dt = rtc.datetime().unwrap();
             println!("Edge events at {}",cur_dt);
             dump_edge_events(&gpio_int_req);
         }
+        else {
+            let cur_dt = rtc.datetime().unwrap();
+            println!("No edge events at {}",cur_dt);
+        }
+
+        let alarm_af = rtc.check_and_clear_alarm().unwrap();
+        println!("{} alarm flag: {}", cur_dt, alarm_af);
         if alarm_af {
             // If we saw edge events, this should also be true
             println!("break on alarm_af true");
@@ -197,7 +187,7 @@ fn main() {
             break;
         }
     }
-    _ = rtc.toggle_alarm_int_enable(false);
+    _ = rtc.clear_all_int_out_bits();
     _ = rtc.check_and_clear_alarm();
 
 
