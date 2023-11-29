@@ -106,6 +106,7 @@ const WADA_BIT: u8 = 1 << 5; // Weekday Alarm / Date Alarm selection bit WADA
 
 // REG_STATUS Status register bits:
 // const EEBUSY_BIT: u8 = 1 << 7;
+const CLOCK_INT_FLAG_BIT: u8 = 1 << 6; // CLKF  / Clock Output Interrupt Flag
 const BACKUP_SWITCH_FLAG: u8 = 1 << 4; // BSF bit
 const ALARM_FLAG_BIT : u8 = 1 << 2; // AF / Alarm Flag
 const EVENT_FLAG_BIT: u8 = 1 << 1; // EVF / Event Flag
@@ -127,12 +128,17 @@ pub const TS_EVENT_SOURCE_BSF: u8 = 1; /// Event log source is backup power swit
 
 // REG_CONTROL2 "Control 2" register bits: TSE CLKIE UIE TIE AIE EIE 12_24 RESET
 const TIME_STAMP_ENABLE_BIT: u8 = 1 << 7; // TSE / Time Stamp Enable bit
+const TIME_UPDATE_INT_ENABLE_BIT: u8 = 1 << 5; // UIE / Time Update Interrupt Enable
+const TIMER_INT_ENABLE_BITL: u8 = 1 << 4;// TIE Countdown Timer Interrupt Enable bit
 const ALARM_INT_ENABLE_BIT: u8 = 1 << 3;// AIE / Alarm Interrupt Enable bit
 const EVENT_INT_ENABLE_BIT: u8 = 1 << 2;// EIE / Event Interrupt Enable bit
 
-
-// EEPROM register bits:
+// EEPROM_MIRROR_ADDRESS / EEPROM mirror register bits:
+const CLOCK_OUT_ENABLE_BIT:u8 = 1<< 7; // CLKOE / CLKOUT Enable bit
+const BACKUP_SWITCH_INT_ENABLE_BIT:u8 = 1 << 6; // BCIE / Backup Switchover Interrupt Enable bit bit
 const TRICKLE_CHARGE_ENABLE_BIT: u8 = 1 << 5; // TCE bit
+
+
 const TRICKLE_CHARGE_RESISTANCE_BITS: u8 = 0b11; // TCR bits
 pub enum TrickleChargeCurrentLimiter {
   Ohms3k = 0b00,
@@ -140,10 +146,6 @@ pub enum TrickleChargeCurrentLimiter {
   Ohms9k = 0b10,
   Ohms15k = 0b11,
 }
-// pub const TRICKLE_CHARGE_RESISTANCE_VALUE_3K: u8 = 0b00;
-// pub const TRICKLE_CHARGE_RESISTANCE_VALUE_5K: u8 = 0b01;
-// pub const TRICKLE_CHARGE_RESISTANCE_VALUE_9K: u8 = 0b10;
-// pub const TRICKLE_CHARGE_RESISTANCE_VALUE_15K: u8 = 0b11;
 
 
 // Special alarm register value
@@ -491,10 +493,6 @@ impl<I2C, E> RV3028<I2C>
                           else { ALARM_NO_WATCH_FLAG | bcd_day })?;
     }
 
-
-
-
-
     // Clear AF again in case the above setting process immediately triggered the alarm
     self.clear_reg_bits(REG_STATUS, ALARM_FLAG_BIT)?;
 
@@ -551,6 +549,26 @@ impl<I2C, E> RV3028<I2C>
       self.clear_reg_bits(reg, bits)
     }
   }
+
+  /// Disable all INT pin output selector bits in RAM, excludes PORIE
+  pub fn clear_all_int_out_bits(&mut self) -> Result<(), E> {
+    // UIE, TIE, AIE,  EIE
+    self.clear_reg_bits(REG_CONTROL2,
+                        TIME_UPDATE_INT_ENABLE_BIT | TIMER_INT_ENABLE_BITL |
+                          ALARM_INT_ENABLE_BIT | EVENT_INT_ENABLE_BIT )?;
+    // BSIE
+    self.clear_reg_bits(EEPROM_MIRROR_ADDRESS, BACKUP_SWITCH_INT_ENABLE_BIT)?;
+
+    // PORIE -- must be set in EEPROM -- don't bother to set?
+    Ok(())
+  }
+
+  /// Enables or disables CLKOUT
+  pub fn toggle_clock_output(&mut self, enable: bool)  -> Result<(), E> {
+    self.clear_reg_bits(REG_STATUS, CLOCK_INT_FLAG_BIT)?;
+    self.set_or_clear_reg_bits(EEPROM_MIRROR_ADDRESS, CLOCK_OUT_ENABLE_BIT, enable)
+  }
+  //CLKOE
 
 }
 

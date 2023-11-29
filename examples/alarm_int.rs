@@ -28,9 +28,9 @@ fn get_sys_timestamp() -> (NaiveDateTime, u32) {
 }
 
 // run through a single iteration of alarm set, and verify the value is set
-fn run_iteration<I2C,E>(rtc: &mut RV3028<I2C>, alarm_dt: &NaiveDateTime,
-                 weekday: Option<Weekday>,
-                 match_day: bool, match_hour: bool, match_minute: bool)
+fn verify_alarm_set<I2C,E>(rtc: &mut RV3028<I2C>, alarm_dt: &NaiveDateTime,
+                           weekday: Option<Weekday>,
+                           match_day: bool, match_hour: bool, match_minute: bool)
     where
       I2C: Write<Error = E> + Read<Error = E> + WriteRead<Error = E>,
       E: std::fmt::Debug
@@ -71,28 +71,38 @@ fn run_iteration<I2C,E>(rtc: &mut RV3028<I2C>, alarm_dt: &NaiveDateTime,
 
 }
 
+fn dump_edge_events(gpio_int_req: &gpiocdev::Request) {
+    //    for edge_event in gpio_int_req.edge_events()
+    while Ok(true) == gpio_int_req.has_edge_event() {
+        if let Ok(inner_evt) = gpio_int_req.read_edge_event() {
+            println!("{:?}", inner_evt);
+        }
+    }
+}
+
+const MUX_I2C_ADDRESS: u8 = 0x70;
+const MUX_CHAN_FIRST:u8 = 0b0000_0001 ; //channel 0, LSB
+const MUX_CHAN_SECOND:u8 = 0b1000_0000 ; // channel 7, MSB
+
 fn main() {
     // This is a specific configuration for Raspberry Pi -- YMMV
 
     let gpio_int_req = gpiocdev::Request::builder()
       .on_chip("/dev/gpiochip0")
-      .with_line(27)
+      .with_line(17)
+      // .as_active_low()
       .with_bias(Bias::PullUp) // INT pulls down briefly when triggered
+      // .with_edge_detection(EdgeDetection::BothEdges)
       .with_edge_detection(EdgeDetection::FallingEdge)
-      // .with_debounce_period(Duration::from_micros(5))
+      // beware -- the debounce filter can easily cause interrupts to be missed
+      // .with_debounce_period(Duration::from_micros(1))
       .request().unwrap();
-
-    // let mut gpiochip = Chip::new("/dev/gpiochip0").unwrap();
-    // // Grab a GPIO input pin on the host for receiving INT signals from RTC
-    // let int_line = gpiochip.get_line(27).unwrap();
-    // //.with_edge_detection(gpiocdev::line::EdgeDetection::BothEdges)
-    // let handle = int_line.request(LineRequestFlags::INPUT, 1, "gpio_int").unwrap();
-    // let int_pin = CdevPin::new(handle).expect("new int_pin");
 
     // Initialize the I2C device
     let i2c = I2cdev::new("/dev/i2c-1").expect("Failed to open I2C device");
     // Create a new instance of the RV3028 driver
-    let mut rtc = RV3028::new(i2c);
+    // let mut rtc = RV3028::new(i2c);
+    let mut rtc = RV3028::new_with_mux(i2c, MUX_I2C_ADDRESS, MUX_CHAN_FIRST);
 
     let (sys_datetime, sys_unix_timestamp) = get_sys_timestamp();
     // use the set_datetime method to ensure all the timekeeping registers on
@@ -115,60 +125,80 @@ fn main() {
     println!("init_dt:  {}", init_dt);
     println!("alarm_dt: {}", alarm_dt);
 
-    // date alarm variations
-    run_iteration(&mut rtc, &alarm_dt, None, true, true, true);
-    run_iteration(&mut rtc, &alarm_dt, None, true, true, false);
-    run_iteration(&mut rtc, &alarm_dt, None, true, false, false);
-    run_iteration(&mut rtc, &alarm_dt, None, false, false, false);
-    run_iteration(&mut rtc, &alarm_dt, None, false, false, true);
-    run_iteration(&mut rtc, &alarm_dt, None, false, true, true);
-    run_iteration(&mut rtc, &alarm_dt, None, false, true, false);
-    run_iteration(&mut rtc, &alarm_dt, None, true, false, true);
+    // Try all date alarm variations
+    verify_alarm_set(&mut rtc, &alarm_dt, None, true, true, true);
+    verify_alarm_set(&mut rtc, &alarm_dt, None, true, true, false);
+    verify_alarm_set(&mut rtc, &alarm_dt, None, true, false, false);
+    verify_alarm_set(&mut rtc, &alarm_dt, None, false, false, false);
+    verify_alarm_set(&mut rtc, &alarm_dt, None, false, false, true);
+    verify_alarm_set(&mut rtc, &alarm_dt, None, false, true, true);
+    verify_alarm_set(&mut rtc, &alarm_dt, None, false, true, false);
+    verify_alarm_set(&mut rtc, &alarm_dt, None, true, false, true);
 
-    // weekday alarm variations
-    run_iteration(&mut rtc, &alarm_dt, Some(Weekday::Mon), true, true, true);
-    run_iteration(&mut rtc, &alarm_dt, Some(Weekday::Tue), true, true, false);
-    run_iteration(&mut rtc, &alarm_dt, Some(Weekday::Wed) , true, false, false);
-    run_iteration(&mut rtc, &alarm_dt, Some(Weekday::Thu), false, false, false);
-    run_iteration(&mut rtc, &alarm_dt, Some(Weekday::Fri), false, false, true);
-    run_iteration(&mut rtc, &alarm_dt, Some(Weekday::Sat), false, true, true);
-    run_iteration(&mut rtc, &alarm_dt, Some(Weekday::Sun), false, true, false);
-    run_iteration(&mut rtc, &alarm_dt, Some(Weekday::Mon), true, false, true);
+    // Try weekday alarm variations
+    verify_alarm_set(&mut rtc, &alarm_dt, Some(Weekday::Mon), true, true, true);
+    verify_alarm_set(&mut rtc, &alarm_dt, Some(Weekday::Tue), true, true, false);
+    verify_alarm_set(&mut rtc, &alarm_dt, Some(Weekday::Wed), true, false, false);
+    verify_alarm_set(&mut rtc, &alarm_dt, Some(Weekday::Thu), false, false, false);
+    verify_alarm_set(&mut rtc, &alarm_dt, Some(Weekday::Fri), false, false, true);
+    verify_alarm_set(&mut rtc, &alarm_dt, Some(Weekday::Sat), false, true, true);
+    verify_alarm_set(&mut rtc, &alarm_dt, Some(Weekday::Sun), false, true, false);
+    verify_alarm_set(&mut rtc, &alarm_dt, Some(Weekday::Mon), true, false, true);
 
 
-    // prep for alarm output on INT pin
-    run_iteration(&mut rtc, &alarm_dt, Some(alarm_dt.weekday()),
-                  false, false, true);
-    rtc.toggle_alarm_int_enable(true).unwrap();
+    // Now, prep for alarm output on INT pin in (less than) 60 seconds
+    let _ = rtc.clear_all_int_out_bits();
+    verify_alarm_set(&mut rtc, &alarm_dt, None,
+                     false, false, true);
     let cur_dt = rtc.datetime().unwrap();
-    println!("wait for alarm to trigger..\r\n{} {}",cur_dt, alarm_dt);
+    println!("{} flush old edge events", cur_dt);
+    dump_edge_events(&gpio_int_req);
 
+    println!("0 is_active: {}",gpio_int_req.value(17).unwrap());
+    rtc.toggle_alarm_int_enable(true).unwrap();
+    println!("wait for alarm to trigger..\r\n{} -> {}",cur_dt, alarm_dt);
+    println!("1 is_active: {}",gpio_int_req.value(17).unwrap());
 
     for _i in 0..10 {
         sleep(Duration::from_secs(10));
+        let cur_dt = rtc.datetime().unwrap();
+        println!("2 is_active: {}",gpio_int_req.value(17).unwrap());
+
+        // if let Ok(true) = gpio_int_req.has_edge_event() {
+        //     println!("Edge events at {}",cur_dt);
+        //     dump_edge_events(&gpio_int_req);
+        // }
+
+        // if let Ok(true) = gpio_int_req.wait_edge_event(Duration::from_secs(10)) {
+        //     let cur_dt = rtc.datetime().unwrap();
+        //     println!("Edge events at {}",cur_dt);
+        //     dump_edge_events(&gpio_int_req);
+        // }
+        // else {
+        //     let cur_dt = rtc.datetime().unwrap();
+        //     println!("No edge events at {}",cur_dt);
+        //     continue;
+        // }
 
         let alarm_af = rtc.check_and_clear_alarm().unwrap();
-        let cur_dt = rtc.datetime().unwrap();
         println!("{} alarm flag: {}", cur_dt, alarm_af);
-
-        if gpio_int_req.has_edge_event().unwrap() {
-            println!("have INT edge_events!", );
-            for edge_event in gpio_int_req.edge_events() {
-                if let Ok(inner_evt) = edge_event {
-                    println!("{} INT event: {:?}",
-                             inner_evt.timestamp_ns, inner_evt);
-                }
-            }
+        if let Ok(true) = gpio_int_req.has_edge_event() {
+            println!("Edge events at {}",cur_dt);
+            dump_edge_events(&gpio_int_req);
         }
-
         if alarm_af {
             // If we saw edge events, this should also be true
+            println!("break on alarm_af true");
             break;
         }
 
         if cur_dt.minute() >= alarm_dt.minute() {
+            println!("break on minute expired");
             break;
         }
     }
+    _ = rtc.toggle_alarm_int_enable(false);
+    _ = rtc.check_and_clear_alarm();
+
 
 }
