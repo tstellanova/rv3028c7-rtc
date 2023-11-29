@@ -21,10 +21,10 @@ fn test_one_shot_duration<I2C,E>(
     I2C: Write<Error = E> + Read<Error = E> + WriteRead<Error = E>,
     E: std::fmt::Debug
 {
-  rtc.toggle_countdown_timer(false, false)?;
-  rtc.configure_countdown_timer(ticks, freq)?;
+  rtc.toggle_countdown_timer(false)?;
+  rtc.configure_countdown_timer(ticks, freq, false)?;
   let start_time = Utc::now().naive_utc();
-  rtc.toggle_countdown_timer(true, false)?;
+  rtc.toggle_countdown_timer(true)?;
   let delta = loop {
     if let Ok(true) = rtc.check_and_clear_countdown() {
       let end_time = Utc::now().naive_utc();
@@ -34,19 +34,23 @@ fn test_one_shot_duration<I2C,E>(
   };
   match freq {
     TimerClockFreq::Hertz4096 => {
-      println!("{} ticks at 4096 Hz finished in {:?} micros",ticks,
-        delta.num_microseconds().unwrap());
+      println!("{} ticks at 4096 Hz finished in {:?} micros ({})",ticks,
+               delta.num_microseconds().unwrap(),
+               (ticks as f32 * 244.14) as u32
+      );
     },
     TimerClockFreq::Hertz64 => {
-      println!("{} ticks at 64 Hz finished in {:?} millis", ticks,
-        delta.num_milliseconds());
+      println!("{} ticks at 64 Hz finished in {:?} millis ({})", ticks,
+        delta.num_milliseconds(),
+        (ticks as f32 * 15.625) as u32
+      );
     },
     TimerClockFreq::Hertz1 => {
-      println!("{} ticks at 64 Hz finished in {:?} seconds", ticks,
+      println!("{} ticks at 1 Hz finished in {:?} seconds", ticks,
         delta.num_seconds());
     },
     TimerClockFreq::HertzSixtieth => {
-      println!("{} ticks at 1/60 Hz finished in {:?} minuts", ticks,
+      println!("{} ticks at 1/60 Hz finished in {:?} minutes", ticks,
       delta.num_minutes());
     },
   }
@@ -69,26 +73,11 @@ fn main() {
   let dt_rtc = rtc.datetime().unwrap();
   println!("start sys {} rtc {}  ", dt_sys, dt_rtc);
 
-  // rtc.configure_countdown_timer(3, TimerClockFreq::Hertz4096);
-  // let start_time = Utc::now().naive_utc();
-  // rtc.toggle_countdown_timer(true, false).unwrap();
-  //
-  // loop {
-  //   if let Ok(true) = rtc.check_and_clear_countdown() {
-  //     let end_time = Utc::now().naive_utc();
-  //     let delta = end_time - start_time;
-  //     println!("countdown finished in {:?} micros", delta.num_microseconds().unwrap());
-  //     break;
-  //   }
-  // }
 
-  test_one_shot_duration(&mut rtc, TimerClockFreq::Hertz4096, 1).unwrap();
   test_one_shot_duration(&mut rtc, TimerClockFreq::Hertz4096, 10).unwrap();
-  test_one_shot_duration(&mut rtc, TimerClockFreq::Hertz64, 1).unwrap();
   test_one_shot_duration(&mut rtc, TimerClockFreq::Hertz64, 10).unwrap();
-  test_one_shot_duration(&mut rtc, TimerClockFreq::Hertz1, 1).unwrap();
   test_one_shot_duration(&mut rtc, TimerClockFreq::Hertz1, 10).unwrap();
-  test_one_shot_duration(&mut rtc, TimerClockFreq::HertzSixtieth, 1).unwrap();
+  // test_one_shot_duration(&mut rtc, TimerClockFreq::HertzSixtieth, 1).unwrap();
 
 
 }

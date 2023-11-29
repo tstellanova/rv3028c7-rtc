@@ -462,7 +462,6 @@ impl<I2C, E> RV3028<I2C>
     self.set_or_clear_reg_bits(REG_CONTROL2, EVENT_INT_ENABLE_BIT, enable)
   }
 
-
   /// Check the alarm status, and if it's triggered, clear it
   /// return bool indicating whether the alarm triggered
   pub fn check_and_clear_alarm(&mut self) -> Result<bool, E> {
@@ -600,7 +599,16 @@ impl<I2C, E> RV3028<I2C>
   }
 
   ///
-  pub fn configure_countdown_timer(&mut self, value: u16, freq: TimerClockFreq)  -> Result<(), E> {
+  ///
+  ///
+  /// - `repeat`: If true, the countdown timer will repeat as a periodic timer.
+  /// If false, the countdown timer will only run once ("one-shot" mode).
+  pub fn configure_countdown_timer(&mut self,
+                                   value: u16,
+                                   freq: TimerClockFreq,
+                                   repeat: bool
+
+  )  -> Result<(), E> {
     let value_low: u8 = (value & 0xFF) as u8;
     let value_high: u8 = ((value >> 8) as u8) & 0x0F;
     self.set_reg_bits(REG_TIMER_VALUE1, value_low)?;
@@ -610,16 +618,16 @@ impl<I2C, E> RV3028<I2C>
     self.clear_reg_bits(REG_CONTROL1, TIMER_CLOCK_FREQ_BITS)?;
     self.set_reg_bits(REG_CONTROL1, freq as u8)?;
 
+    self.set_or_clear_reg_bits(REG_CONTROL1, TIMER_REPEAT_BIT, repeat)?;
+
+    self.clear_reg_bits(REG_STATUS, PERIODIC_TIMER_FLAG);
+
     Ok(())
   }
 
   /// Set whether the Periodic Countdown Timer mode is repeating (periodic) or one-shot.
   /// - `enable`: If true, starts the timer countdown. If false, stops the timer.
-  /// - `repeat`: If true, the countdown timer will repeat as a periodic timer.
-  /// If false, the countdown timer will only run once ("one-shot" mode).
-  pub fn toggle_countdown_timer(&mut self, enable: bool, repeat: bool)  -> Result<(), E> {
-    self.clear_reg_bits(REG_STATUS, PERIODIC_TIMER_FLAG);
-    self.set_or_clear_reg_bits(REG_CONTROL1, TIMER_REPEAT_BIT, repeat)?;
+  pub fn toggle_countdown_timer(&mut self, enable: bool)  -> Result<(), E> {
     self.set_or_clear_reg_bits(REG_CONTROL1, TIMER_ENABLE_BIT, enable)
   }
 
