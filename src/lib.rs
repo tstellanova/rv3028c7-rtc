@@ -119,11 +119,11 @@ const TIMER_ENABLE_BIT: u8 = 1 << 2; // TE / Periodic Countdown Timer Enable bit
 const TIMER_CLOCK_FREQ_BITS: u8 = 0b11; // TD / Timer Clock Frequency selection bits
 
 /// Countown timer clock frequency selector
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum TimerClockFreq {
-  Hertz4096 = 0b00, // 244.14 μs period
-  Hertz64 = 0b01, // 15.625 ms period
-  Hertz1 = 0b10, // One second period
+  Hertz4096 = 0b00, // 4096 Hz, 244.14 μs period
+  Hertz64 = 0b01, // 64 Hz, 15.625 ms period
+  Hertz1 = 0b10, // 1 Hz, One second period
   HertzSixtieth = 0b11, // 1/60 Hz, One minute period
 }
 
@@ -584,12 +584,7 @@ impl<I2C, E> RV3028<I2C>
   }
 
   // Configure the Periodic Countdown Timer prior to the next countdown.
-  fn pct_prep(&mut self,
-              value: u16,
-              freq: TimerClockFreq,
-              repeat: bool
-
-  ) -> Result<(), E> {
+  fn pct_prep(&mut self, value: u16, freq: TimerClockFreq,  repeat: bool ) -> Result<(), E> {
     let value_high: u8 = ((value >> 8) as u8) & 0x0F;
     let value_low: u8 = (value & 0xFF) as u8;
 
@@ -609,42 +604,48 @@ impl<I2C, E> RV3028<I2C>
     Ok(())
   }
 
+  const MAX_PCT_TICKS: u16 = 0x0FFF; // 4095
+  const PCT_MILLIS_PERIOD:i64 = 15; // 15.625 ms period
+  const PCT_MICROS_PERIOD:i64 = 244; // 244.14 μs period
+  const MAX_PCT_COUNT:i64 = Self::MAX_PCT_TICKS as i64;
+  const MAX_PCT_MILLIS:i64 = Self::MAX_PCT_COUNT * Self::PCT_MILLIS_PERIOD;
+  const MAX_PCT_MICROS:i64 = Self::MAX_PCT_COUNT * Self::PCT_MICROS_PERIOD;
+
   // Calculate the closest clock frequency and
   // number of ticks to match the given duration using the
   // Periodic Countdown Timer (PCT)
   fn pct_ticks_and_rate_for_duration(dur: &Duration) -> (u16, TimerClockFreq)
   {
-    const MAX_TICKS: u16 = 0x0FFF;
-    const MAX_COUNT_VAL:i64 = MAX_TICKS as i64;
-    const MILLIS_FACTOR:i64 = 15; // 15.625 ms period
-    const MICROS_FACTOR:i64 = 244; // 244.14 μs period
-    const MAX_MILLIS_COUNT:i64 = MAX_COUNT_VAL * MILLIS_FACTOR;
-    const MAX_MICROS_COUNT:i64 = MAX_COUNT_VAL * MICROS_FACTOR;
-
     let whole_minutes = dur.num_minutes();
     let whole_seconds = dur.num_seconds();
     let whole_milliseconds = dur.num_milliseconds();
+    let frac_milliseconds = whole_milliseconds % 1_000;
+    let infrac_millis = whole_milliseconds % Self::PCT_MILLIS_PERIOD;
     let whole_microseconds = dur.num_microseconds().unwrap();
+    let frac_microseconds = whole_microseconds % 1_000_000;
 
-    return if whole_minutes > MAX_COUNT_VAL {
-      (MAX_TICKS, TimerClockFreq::HertzSixtieth)
-    } else if whole_seconds >= MAX_COUNT_VAL {
+    return if whole_minutes >= Self::MAX_PCT_COUNT {
+      (Self::MAX_PCT_TICKS, TimerClockFreq::HertzSixtieth)
+    } else if whole_seconds > Self::MAX_PCT_COUNT {
       // use minutes
-      let minutes = (whole_minutes & MAX_COUNT_VAL) as u16;
-      (minutes, TimerClockFreq::HertzSixtieth)
-    } else if whole_milliseconds >= MAX_MILLIS_COUNT {
+      let ticks = (whole_minutes & Self::MAX_PCT_COUNT) as u16;
+      (ticks, TimerClockFreq::HertzSixtieth)
+    } else if  (whole_milliseconds > Self::MAX_PCT_MILLIS) ||
+      ((0 == frac_milliseconds) && (whole_milliseconds > 0))  {
       // use seconds
-      let seconds = (whole_seconds & MAX_COUNT_VAL) as u16;
-      (seconds, TimerClockFreq::Hertz1)
-    } else if whole_microseconds >= MAX_MICROS_COUNT {
+      let ticks = (whole_seconds & Self::MAX_PCT_COUNT) as u16;
+      (ticks, TimerClockFreq::Hertz1)
+    } else if (whole_microseconds > Self::MAX_PCT_MICROS) ||
+      ((0 == frac_microseconds) && (whole_microseconds > 0)) ||
+      ((0 == infrac_millis) && (whole_milliseconds > Self::PCT_MILLIS_PERIOD)) {
       // use milliseconds
-      let millis = whole_milliseconds % MAX_MILLIS_COUNT;
-      let ticks = (millis / MILLIS_FACTOR) as u16;
+      // let millis = whole_milliseconds & Self::MAX_PCT_MILLIS;
+      let ticks = (whole_milliseconds / Self::PCT_MILLIS_PERIOD) as u16;
       (ticks, TimerClockFreq::Hertz64)
     } else {
       // use microseconds
-      let micros = whole_microseconds % MAX_MICROS_COUNT;
-      let ticks = (micros / MICROS_FACTOR) as u16;
+      // let micros = whole_microseconds & Self::MAX_PCT_MICROS;
+      let ticks = (whole_microseconds / Self::PCT_MICROS_PERIOD) as u16;
       (ticks, TimerClockFreq::Hertz4096)
     }
 
@@ -831,6 +832,7 @@ mod tests {
   use std::vec;
 
 
+  type TestClass = RV3028<I2cMock>;
 
 
   #[test]
@@ -875,7 +877,128 @@ mod tests {
     assert_eq!(rv3028.get_unix_time().unwrap(), unix_time);
   }
 
+  #[test]
+  fn test_countdown_timer_conversion_minutes() {
+    // should be fulfilled as minutes
+    let known_rate = TimerClockFreq::HertzSixtieth;
+
+    let (ticks, freq) =
+      TestClass::pct_ticks_and_rate_for_duration(
+        &Duration::minutes(TestClass::MAX_PCT_COUNT + 32));
+    assert_eq!(ticks, TestClass::MAX_PCT_TICKS);
+    assert_eq!(freq, known_rate);
+
+    let (ticks, freq) =
+      TestClass::pct_ticks_and_rate_for_duration(&Duration::minutes(TestClass::MAX_PCT_COUNT ));
+    assert_eq!(ticks, TestClass::MAX_PCT_TICKS);
+    assert_eq!(freq, known_rate);
+
+    let (_ticks, freq) =
+      TestClass::pct_ticks_and_rate_for_duration(&Duration::minutes(1024));
+    assert_eq!(freq, known_rate);
+
+  }
+
+  #[test]
+  fn test_countdown_timer_conversion_seconds() {
+    // should be fulfilled as seconds
+    let known_rate = TimerClockFreq::Hertz1;
+
+    let (ticks, freq) =
+      TestClass::pct_ticks_and_rate_for_duration(&Duration::seconds(TestClass::MAX_PCT_COUNT));
+    assert_eq!(freq, known_rate);
+    assert_eq!(ticks, TestClass::MAX_PCT_TICKS);
+
+    let (ticks, freq) =
+      TestClass::pct_ticks_and_rate_for_duration(&Duration::seconds(1024));
+    assert_eq!(freq, known_rate);
+    assert_eq!(ticks, 1024);
+
+    let (ticks, freq) =
+      TestClass::pct_ticks_and_rate_for_duration(&Duration::seconds(61));
+    assert_eq!(freq, known_rate);
+    assert_eq!(ticks, 61);
+
+    let (ticks, freq) =
+      TestClass::pct_ticks_and_rate_for_duration(&Duration::seconds(60));
+    assert_eq!(freq, known_rate);
+    assert_eq!(ticks, 60);
+
+    let (ticks, freq) =
+      TestClass::pct_ticks_and_rate_for_duration(&Duration::minutes(1));
+    assert_eq!(freq, known_rate);
+    assert_eq!(ticks, 60);
+
+    let (ticks, freq) =
+      TestClass::pct_ticks_and_rate_for_duration(&Duration::minutes(45));
+    assert_eq!(freq, known_rate);
+    assert_eq!(ticks, 45*60);
+
+    let (ticks, freq) =
+      TestClass::pct_ticks_and_rate_for_duration(&Duration::seconds(1));
+    assert_eq!(freq, known_rate);
+    assert_eq!(ticks, 1);
+  }
+
+  #[test]
+  fn test_countdown_timer_conversion_millis() {
+    // should be fulfilled as milliseconds
+    let known_rate = TimerClockFreq::Hertz64;
+
+    // maximum millis counter
+    let (ticks, freq) =
+      TestClass::pct_ticks_and_rate_for_duration(
+        &Duration::milliseconds(TestClass::MAX_PCT_MILLIS));
+    assert_eq!(freq, known_rate);
+    assert_eq!(ticks, TestClass::MAX_PCT_TICKS);
+
+    let (ticks, freq) =
+      TestClass::pct_ticks_and_rate_for_duration(&Duration::milliseconds(1024));
+    assert_eq!(freq, known_rate);
+    assert_eq!(ticks as i64, 1024/TestClass::PCT_MILLIS_PERIOD);
+
+    // just a smidge more than what the micros counter can support
+    let (_ticks, freq) =
+      TestClass::pct_ticks_and_rate_for_duration(
+        &Duration::microseconds(TestClass::MAX_PCT_MICROS + 1));
+    assert_eq!(freq, known_rate);
+
+    // exactly on the millis counter
+    let (_ticks, freq) =
+      TestClass::pct_ticks_and_rate_for_duration(
+        &Duration::milliseconds(66*TestClass::PCT_MILLIS_PERIOD));
+    assert_eq!(freq, known_rate);
+    // assert_eq!(ticks, 66); //TODO fix
+
+  }
+  #[test]
+  fn test_countdown_timer_conversion_micros() {
+    // should be fulfilled as microseconds
+    let known_rate = TimerClockFreq::Hertz4096;
+
+    let (ticks, freq) =
+      TestClass::pct_ticks_and_rate_for_duration(
+        &Duration::microseconds(TestClass::MAX_PCT_MICROS));
+    assert_eq!(freq, known_rate);
+    assert_eq!(ticks, TestClass::MAX_PCT_TICKS);
+
+    let (ticks, freq) =
+      TestClass::pct_ticks_and_rate_for_duration(&Duration::microseconds(2048));
+    assert_eq!(freq, known_rate);
+    assert_eq!(ticks as i64, 2048/TestClass::PCT_MICROS_PERIOD);
+
+    let (ticks, freq) =
+      TestClass::pct_ticks_and_rate_for_duration(&Duration::microseconds(655));
+    assert_eq!(freq, known_rate);
+    assert_eq!(ticks as i64, 655/TestClass::PCT_MICROS_PERIOD);
+
+    let (ticks, freq) =
+      TestClass::pct_ticks_and_rate_for_duration(&Duration::microseconds(1024));
+    assert_eq!(freq, known_rate);
+    assert_eq!(ticks as i64, 1024/TestClass::PCT_MICROS_PERIOD);
+
+  }
 
 
-}
+  }
 

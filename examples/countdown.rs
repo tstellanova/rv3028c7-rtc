@@ -29,8 +29,7 @@ use embedded_hal::blocking::i2c::{Write, Read, WriteRead};
 //   }
 // }
 
-fn test_one_shot_duration<I2C,E>(
-  rtc: &mut RV3028<I2C>, dur: &Duration)  -> Result<Duration, E>
+fn test_one_shot_duration<I2C,E>(rtc: &mut RV3028<I2C>, dur: &Duration)  -> Result<Duration, E>
   where
     I2C: Write<Error = E> + Read<Error = E> + WriteRead<Error = E>,
     E: std::fmt::Debug
@@ -53,8 +52,7 @@ fn test_one_shot_duration<I2C,E>(
     }
   };
 
-  println!("actual {} (expected {})", actual, dur);
-
+  println!("actual {} expected {}", actual, dur);
   Ok(actual)
 }
 
