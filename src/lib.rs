@@ -120,7 +120,7 @@ const TIMER_CLOCK_FREQ_BITS: u8 = 0b11; // TD / Timer Clock Frequency selection 
 
 /// Countown timer clock frequency selector
 #[derive(Clone, Copy)]
-pub enum TimerClockFreq {
+enum TimerClockFreq {
   Hertz4096 = 0b00, // 244.14 μs period
   Hertz64 = 0b01, // 15.625 ms period
   Hertz1 = 0b10, // One second period
@@ -595,6 +595,7 @@ impl<I2C, E> RV3028<I2C>
 
     // configure the timer clock source / period
     self.set_or_clear_reg_bits(REG_CONTROL1, TIMER_REPEAT_BIT, repeat)?;
+    self.clear_reg_bits(REG_CONTROL1, TIMER_ENABLE_BIT)?;
 
     self.clear_reg_bits(REG_CONTROL1, TIMER_CLOCK_FREQ_BITS)?;
     self.set_reg_bits(REG_CONTROL1, freq as u8)?;
@@ -658,7 +659,7 @@ impl<I2C, E> RV3028<I2C>
   pub fn setup_countdown_timer(&mut self, duration: &Duration,
                                repeat: bool
   )  -> Result<(), E> {
-    let (ticks, freq) = Self::pct_ticks_and_rate_for_duration(dur);
+    let (ticks, freq) = Self::pct_ticks_and_rate_for_duration(duration);
     self.pct_prep(ticks, freq, repeat)
   }
 
