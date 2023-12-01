@@ -32,26 +32,32 @@ fn main() {
   // let mut rtc = RV3028::new(i2c);
   let mut rtc1 = RV3028::new_with_mux(i2c_bus.acquire_i2c(), MUX_I2C_ADDRESS, MUX_CHAN_FIRST);
   let mut rtc2 = RV3028::new_with_mux(i2c_bus.acquire_i2c(), MUX_I2C_ADDRESS, MUX_CHAN_SECOND);
+  let mut rtc3 = RV3028::new(i2c_bus.acquire_i2c());
 
   let (sys_datetime, sys_unix_timestamp) = get_sys_timestamp();
   // use the set_datetime method to ensure all the timekeeping registers on
   // the rtc are aligned to the same values
+  rtc3.set_datetime(&sys_datetime).unwrap();
   rtc1.set_datetime(&sys_datetime).unwrap();
   rtc2.set_datetime(&sys_datetime).unwrap();
-  let rtc_unix_time = rtc2.get_unix_time().unwrap();
+
+  let rtc_unix_time = rtc3.get_unix_time().unwrap();
   // verify that the individual year, month, day registers are set correctly
-  let (year, month, day) = rtc2.get_ymd().unwrap();
-  println!("start sys {} rtc {} ymd {} {} {} ", sys_unix_timestamp, rtc_unix_time, year, month, day);
+  let rtc3_dt = rtc3.datetime().unwrap();
+  println!("start sys {} rtc {} {}" , sys_unix_timestamp, rtc_unix_time, rtc3_dt);
 
   // disable alarm interrupts to begin with
   // rtc2.toggle_alarm_int_enable(false).unwrap();
   rtc1.clear_all_int_out_bits().unwrap();
   rtc2.clear_all_int_out_bits().unwrap();
+  rtc3.clear_all_int_out_bits().unwrap();
   rtc1.toggle_clock_output(false).unwrap();
   rtc2.toggle_clock_output(false).unwrap();
+  rtc3.toggle_clock_output(false).unwrap();
 
   rtc1.check_and_clear_alarm().unwrap();
   rtc2.check_and_clear_alarm().unwrap();
+  rtc3.check_and_clear_alarm().unwrap();
 
   println!("INT disabled, pausing...");
   sleep(Duration::from_secs(3));
@@ -62,6 +68,7 @@ fn main() {
   println!("alarm_dt: {}", alarm_dt);
   rtc1.set_alarm(&alarm_dt, None, false, false, true).unwrap();
   rtc2.set_alarm(&alarm_dt, None, false, false, true).unwrap();
+  rtc3.set_alarm(&alarm_dt, None, false, false, true).unwrap();
 
   let (next_alarm_dt, _, _, _, _) =
     rtc1.get_alarm_datetime_wday_matches().unwrap();
@@ -73,4 +80,8 @@ fn main() {
   rtc2.toggle_alarm_int_enable(true).unwrap();
   println!("rtc2 alarm at {} ", next_alarm_dt);
 
+  let (next_alarm_dt, _, _, _, _) =
+    rtc3.get_alarm_datetime_wday_matches().unwrap();
+  rtc3.toggle_alarm_int_enable(false).unwrap();
+  println!("rtc3 alarm at {} ", next_alarm_dt);
 }

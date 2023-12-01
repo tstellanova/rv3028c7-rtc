@@ -91,7 +91,7 @@ fn main() {
     // Create a new instance of the RV3028 driver
     // let mut rtc = RV3028::new(i2c);
     let mut rtc =
-      RV3028::new_with_mux(i2c, MUX_I2C_ADDRESS, MUX_CHAN_SECOND);
+      RV3028::new_with_mux(i2c, MUX_I2C_ADDRESS, MUX_CHAN_FIRST);
 
     let (sys_datetime, sys_unix_timestamp) = get_sys_timestamp();
     // use the set_datetime method to ensure all the timekeeping registers on
@@ -141,7 +141,7 @@ fn main() {
     let gpio_int_req = gpiocdev::Request::builder()
       .on_chip("/dev/gpiochip0")
       .with_line(17)
-      .with_line(27)
+      //.with_line(27)
       // this pin is "active" when it is low, because we've attached a pull-up resistor of 2.2k
       .as_active_low()
       // PullUp bias doesn't appear to work on Rpi3
@@ -163,8 +163,8 @@ fn main() {
     rtc.toggle_alarm_int_enable(true).unwrap();
     println!("wait for alarm to trigger..\r\n{} -> {}",cur_dt, alarm_dt);
 
-    for _i in 0..10 {
-        if let Ok(true) = gpio_int_req.wait_edge_event(Duration::from_secs(10)) {
+    for _i in 0..20 {
+        if let Ok(true) = gpio_int_req.wait_edge_event(Duration::from_secs(5)) {
             let cur_dt = rtc.datetime().unwrap();
             println!("Edge events at {}",cur_dt);
             dump_edge_events(&gpio_int_req);

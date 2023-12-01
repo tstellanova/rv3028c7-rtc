@@ -3,7 +3,7 @@
 
 
 pub use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike, Weekday};
-use chrono::NaiveTime;
+use chrono::{Duration, NaiveTime};
 pub use rtcc::{  DateTimeAccess };
 
 use embedded_hal::blocking::i2c::{Write, Read, WriteRead};
@@ -62,16 +62,16 @@ const REG_WEEKDAY_DATE_ALARM: u8 = 0x09;
 // This value will be automatically reloaded into the Countdown Timer when it reaches zero
 // If the TRPT bit is 1, this value will be automatically reloaded into the Countdown Timer
 // when it reaches zero: this allows for periodic timer interrupts
-const REG_TIMER_VALUE1: u8 = 0x0A;
+const REG_TIMER_VALUE0: u8 = 0x0A;
 
 // This register is used to set the upper 4 bits of the 12 bit Timer Value (preset value)
 // for the Periodic Countdown Timer.
 // If the TRPT bit is 1, this value will be automatically reloaded into the Countdown Timer
 // when it reaches zero: this allows for periodic timer interrupts
-const REG_TIMER_VALUE2: u8 = 0x0B;
+// const REG_TIMER_VALUE1: u8 = 0x0B;
 
 const REG_TIMER_STATUS0: u8 = 0x0C; // Read-only lower 8 bits of Periodic Countdown Timer
-const REG_TIMER_STATUS1: u8 = 0x0D; // Read-only upper 4 bits of Periodic Countdown Timer
+// const REG_TIMER_STATUS1: u8 = 0x0D; // Read-only upper 4 bits of Periodic Countdown Timer
 
 
 // This register is used to detect the occurrence of various interrupt events
@@ -116,7 +116,7 @@ const WADA_BIT: u8 = 1 << 5; // WADA / Weekday Alarm / Date Alarm selection bit
 // const USEL_BIT: u8 = 1 << 4;
 // const EERD_BIT: u8 = 1 << 3;
 const TIMER_ENABLE_BIT: u8 = 1 << 2; // TE / Periodic Countdown Timer Enable bit.
-const TIMER_CLOCK_FREQ_BITS: u8 = 0b11; // Timer Clock Frequency selection bits
+const TIMER_CLOCK_FREQ_BITS: u8 = 0b11; // TD / Timer Clock Frequency selection bits
 
 /// Countown timer clock frequency selector
 #[derive(Clone, Copy)]
@@ -173,10 +173,6 @@ pub enum TrickleChargeCurrentLimiter {
   Ohms9k = 0b10,
   Ohms15k = 0b11,
 }
-
-// REG_TIMER_VALUE1 bits
-// REG_TIMER_VALUE2 bits
-
 
 // Special alarm register value
 const ALARM_NO_WATCH_FLAG: u8 = 1 <<  7;
@@ -344,10 +340,6 @@ impl<I2C, E> RV3028<I2C>
       Self::bin_to_bcd(time.hour() as u8 )
     ];
     self.i2c.write(RV3028_ADDRESS, &write_buf)
-
-    // self.write_register(REG_HOURS, Self::bin_to_bcd(time.hour() as u8))?;
-    // self.write_register(REG_MINUTES, Self::bin_to_bcd(time.minute() as u8))?;
-    // self.write_register(REG_SECONDS, Self::bin_to_bcd(time.second() as u8))
   }
 
 
@@ -368,12 +360,6 @@ impl<I2C, E> RV3028<I2C>
       Self::bin_to_bcd(year )
     ];
     self.i2c.write(RV3028_ADDRESS, &write_buf)
-
-    // self.write_register(REG_WEEKDAY, Self::bin_to_bcd(weekday))?;
-    // self.write_register(REG_DATE, Self::bin_to_bcd(day))?;
-    // self.write_register(REG_MONTH, Self::bin_to_bcd(month))?;
-    // self.write_register(REG_YEAR, Self::bin_to_bcd(year))?;
-
   }
 
   /// Get the year, month, day from the internal BCD registers
@@ -488,12 +474,11 @@ impl<I2C, E> RV3028<I2C>
 
     // Procedure suggested by App Notes:
     // 1. Initialize bits AIE and AF to 0.
-    // 2. Choose weekday alarm or date alarm (weekday/date) by setting the WADA bit. WADA = 0 for weekday alarm
-    // or WADA = 1 for date alarm.
+    // 2. Choose weekday alarm or date alarm (weekday/date) by setting the WADA bit.
+    // WADA = 0 for weekday alarm or WADA = 1 for date alarm.
     // 3. Write the desired alarm settings in registers 07h to 09h. The three alarm enable bits, AE_M, AE_H and
     // AE_WD, are used to select the corresponding register that has to be taken into account for match or not.
     // See the following table.
-
 
     // Clear WADA for weekday alarm, or set for date alarm
     self.set_or_clear_reg_bits(REG_CONTROL1, WADA_BIT, !weekday.is_some())?;
@@ -598,31 +583,83 @@ impl<I2C, E> RV3028<I2C>
     self.set_or_clear_reg_bits(EEPROM_MIRROR_ADDRESS, CLOCK_OUT_ENABLE_BIT, enable)
   }
 
-  ///
-  ///
-  ///
-  /// - `repeat`: If true, the countdown timer will repeat as a periodic timer.
-  /// If false, the countdown timer will only run once ("one-shot" mode).
-  pub fn configure_countdown_timer(&mut self,
-                                   value: u16,
-                                   freq: TimerClockFreq,
-                                   repeat: bool
+  // Configure the Periodic Countdown Timer prior to the next countdown.
+  fn pct_prep(&mut self,
+              value: u16,
+              freq: TimerClockFreq,
+              repeat: bool
 
-  )  -> Result<(), E> {
-    let value_low: u8 = (value & 0xFF) as u8;
+  ) -> Result<(), E> {
     let value_high: u8 = ((value >> 8) as u8) & 0x0F;
-    self.set_reg_bits(REG_TIMER_VALUE1, value_low)?;
-    self.set_reg_bits(REG_TIMER_VALUE2, value_high)?;
+    let value_low: u8 = (value & 0xFF) as u8;
 
     // configure the timer clock source / period
+    self.set_or_clear_reg_bits(REG_CONTROL1, TIMER_REPEAT_BIT, repeat)?;
+
     self.clear_reg_bits(REG_CONTROL1, TIMER_CLOCK_FREQ_BITS)?;
     self.set_reg_bits(REG_CONTROL1, freq as u8)?;
 
-    self.set_or_clear_reg_bits(REG_CONTROL1, TIMER_REPEAT_BIT, repeat)?;
+    // write to REG_TIMER_VALUE0 and REG_TIMER_VALUE1
+    let write_buf = [ REG_TIMER_VALUE0, value_low, value_high];
+    self.i2c.write(RV3028_ADDRESS, &write_buf)?;
 
-    self.clear_reg_bits(REG_STATUS, PERIODIC_TIMER_FLAG);
+    self.clear_reg_bits(REG_STATUS, PERIODIC_TIMER_FLAG)?;
 
     Ok(())
+  }
+
+  // Calculate the closest clock frequency and
+  // number of ticks to match the given duration using the
+  // Periodic Countdown Timer (PCT)
+  fn pct_ticks_and_rate_for_duration(dur: &Duration) -> (u16, TimerClockFreq)
+  {
+    const MAX_TICKS: u16 = 0x0FFF;
+    const MAX_COUNT_VAL:i64 = MAX_TICKS as i64;
+    const MILLIS_FACTOR:i64 = 15; // 15.625 ms period
+    const MICROS_FACTOR:i64 = 244; // 244.14 μs period
+    const MAX_MILLIS_COUNT:i64 = MAX_COUNT_VAL * MILLIS_FACTOR;
+    const MAX_MICROS_COUNT:i64 = MAX_COUNT_VAL * MICROS_FACTOR;
+
+    let whole_minutes = dur.num_minutes();
+    let whole_seconds = dur.num_seconds();
+    let whole_milliseconds = dur.num_milliseconds();
+    let whole_microseconds = dur.num_microseconds().unwrap();
+
+    return if whole_minutes > MAX_COUNT_VAL {
+      (MAX_TICKS, TimerClockFreq::HertzSixtieth)
+    } else if whole_seconds >= MAX_COUNT_VAL {
+      // use minutes
+      let minutes = (whole_minutes & MAX_COUNT_VAL) as u16;
+      (minutes, TimerClockFreq::HertzSixtieth)
+    } else if whole_milliseconds >= MAX_MILLIS_COUNT {
+      // use seconds
+      let seconds = (whole_seconds & MAX_COUNT_VAL) as u16;
+      (seconds, TimerClockFreq::Hertz1)
+    } else if whole_microseconds >= MAX_MICROS_COUNT {
+      // use milliseconds
+      let millis = whole_milliseconds % MAX_MILLIS_COUNT;
+      let ticks = (millis / MILLIS_FACTOR) as u16;
+      (ticks, TimerClockFreq::Hertz64)
+    } else {
+      // use microseconds
+      let micros = whole_microseconds % MAX_MICROS_COUNT;
+      let ticks = (micros / MICROS_FACTOR) as u16;
+      (ticks, TimerClockFreq::Hertz4096)
+    }
+
+  }
+
+  /// Prepare the Periodic Countdown Timer for a countdown,
+  /// but don't start it counting down yet.
+  ///
+  /// - `repeat`: If true, the countdown timer will repeat as a periodic timer.
+  /// If false, the countdown timer will only run once ("one-shot" mode).
+  ///
+  pub fn setup_countdown_timer(&mut self, duration: &Duration,
+                               repeat: bool
+  )  -> Result<(), E> {
+    let (ticks, freq) = Self::pct_ticks_and_rate_for_duration(dur);
+    self.pct_prep(ticks, freq, repeat)
   }
 
   /// Set whether the Periodic Countdown Timer mode is repeating (periodic) or one-shot.
@@ -641,8 +678,18 @@ impl<I2C, E> RV3028<I2C>
     Ok(flag_set)
   }
 
+  /// Read the current value of the Periodic Countdown Timer,
+  /// which is only valid after the timer has been enabled.
+  /// The meaning of the value depends on the configured TimerClockFreq
+  pub fn get_countdown_value(&mut self) -> Result<u16, E> {
+    let mut read_buf = [0u8;2];
+    self.read_multi_registers(REG_TIMER_STATUS0, &mut read_buf)?;
+    let value = ((read_buf[1] as u16) << 8) | (read_buf[0] as u16);
+    Ok(value)
+  }
 
 }
+
 
 pub trait EventTimeStampLogger {
   /// Error type
