@@ -631,16 +631,16 @@ impl<I2C, E> RV3028<I2C>
       let ticks = (whole_minutes & Self::MAX_PCT_COUNT) as u16;
       (ticks, TimerClockFreq::HertzSixtieth)
     } else if  (whole_milliseconds > Self::MAX_PCT_MILLIS) ||
-      ((0 == frac_milliseconds) && (whole_milliseconds > 0))  {
+      ((0 == frac_milliseconds) && (whole_milliseconds >= 1_000))  {
       // use seconds
       let ticks = (whole_seconds & Self::MAX_PCT_COUNT) as u16;
       (ticks, TimerClockFreq::Hertz1)
     } else if (whole_microseconds > Self::MAX_PCT_MICROS) ||
       ((0 == frac_microseconds) && (whole_microseconds > 0)) ||
-      ((0 == infrac_millis) && (whole_milliseconds > Self::PCT_MILLIS_PERIOD)) {
+      ((0 == infrac_millis) && (whole_milliseconds >= Self::PCT_MILLIS_PERIOD)) {
       // use milliseconds
-      // let millis = whole_milliseconds & Self::MAX_PCT_MILLIS;
-      let ticks = (whole_milliseconds / Self::PCT_MILLIS_PERIOD) as u16;
+      let millis = whole_milliseconds & Self::MAX_PCT_MILLIS;
+      let ticks = (millis / Self::PCT_MILLIS_PERIOD) as u16;
       (ticks, TimerClockFreq::Hertz64)
     } else {
       // use microseconds
@@ -968,7 +968,7 @@ mod tests {
       TestClass::pct_ticks_and_rate_for_duration(
         &Duration::milliseconds(66*TestClass::PCT_MILLIS_PERIOD));
     assert_eq!(freq, known_rate);
-    // assert_eq!(ticks, 66); //TODO fix
+    assert_eq!(ticks, 66); //TODO fix
 
   }
   #[test]

@@ -8,27 +8,6 @@ use rtcc::DateTimeAccess;
 use embedded_hal::blocking::i2c::{Write, Read, WriteRead};
 
 
-
-// fn calc_countdown_period(ticks: u16, freq: TimerClockFreq) -> Duration {
-//   let clean_ticks: i64 = ticks as i64;
-//   match freq {
-//     TimerClockFreq::Hertz4096 => {
-//       let micros = (clean_ticks * 1_000_000) / 4096;
-//         Duration::microseconds( micros)
-//     },
-//     TimerClockFreq::Hertz64 => {
-//       let millis = (clean_ticks * 1_000) / 64;
-//       Duration::milliseconds(millis)
-//     },
-//     TimerClockFreq::Hertz1 => {
-//       Duration::seconds(clean_ticks)
-//     },
-//     TimerClockFreq::HertzSixtieth => {
-//       Duration::seconds(clean_ticks*60)
-//     },
-//   }
-// }
-
 fn test_one_shot_duration<I2C,E>(rtc: &mut RV3028<I2C>, dur: &Duration)  -> Result<Duration, E>
   where
     I2C: Write<Error = E> + Read<Error = E> + WriteRead<Error = E>,
@@ -41,14 +20,29 @@ fn test_one_shot_duration<I2C,E>(rtc: &mut RV3028<I2C>, dur: &Duration)  -> Resu
   let expected_sleep = dur.to_std().unwrap();
   let start_time = Utc::now().naive_utc();
 
+  println!("sleep {} ", dur);
   rtc.toggle_countdown_timer(true)?;
-  std::thread::sleep(expected_sleep);
+  spin_sleep::sleep(expected_sleep);
+  // std::thread::sleep(expected_sleep);
 
+  let mut last_remaining = 555;
   let actual = loop {
     if let Ok(true) = rtc.check_and_clear_countdown() {
       let end_time = Utc::now().naive_utc();
-      let delta = (end_time - start_time) - Duration::microseconds(1956) ;
+      let delta =  end_time - start_time ;
       break delta;
+    }
+    else {
+      let val =     rtc.get_countdown_value()?;
+      println!("remain: {}", val);
+      if 0 == val {
+        if 0 == last_remaining {
+          let end_time = Utc::now().naive_utc();
+          let delta = end_time - start_time;
+          break delta;
+        }
+        last_remaining = 0;
+      }
     }
   };
 
@@ -80,12 +74,9 @@ fn main() {
   test_one_shot_duration(&mut rtc, &Duration::milliseconds(45)).unwrap();
 
   test_one_shot_duration(&mut rtc, &Duration::seconds(30)).unwrap();
-
+  test_one_shot_duration(&mut rtc, &Duration::minutes(2)).unwrap();
   test_one_shot_duration(&mut rtc, &Duration::seconds(300)).unwrap();
-  // test_one_shot_duration(&mut rtc, &Duration::seconds(3000)).unwrap();
-  //
-  // test_one_shot_duration(&mut rtc, &Duration::seconds(5000)).unwrap();
-  // test_one_shot_duration(&mut rtc, &Duration::minutes(100)).unwrap();
+
 
 
 }
