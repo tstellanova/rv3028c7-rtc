@@ -24,6 +24,12 @@ These examples all assume there is a single RTC connected directly to a raspberr
 - [`event_log`](./examples/event_log.rs) shows how to configure and enable event logging (for example, 
 detecting interrupt signals on the EVI pin)
 - [`alarm_int`](./examples/alarm_int.rs) shows how to set and get the alarm, and check for alarm trigger
+- [`trickle`](./examples/trickle.rs) shows how to enable and disable trickle charging, as well as enable
+Vbackup switchover
+- [`countdown`](./examples/countdown.rs) demonstrates setting the Periodic Countdown Timer for repeating and
+one-shot modes.
+- [`set_alarm`](./examples/set_alarm.rs) shows setting the alarm
+
 
 ### Multiple RTC examples
 These examples all assume that there are multiple RTCs connected to the host
