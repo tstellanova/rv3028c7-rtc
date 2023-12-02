@@ -589,8 +589,8 @@ impl<I2C, E> RV3028<I2C>
     let value_low: u8 = (value & 0xFF) as u8;
 
     // configure the timer clock source / period
-    self.set_or_clear_reg_bits(REG_CONTROL1, TIMER_REPEAT_BIT, repeat)?;
     self.clear_reg_bits(REG_CONTROL1, TIMER_ENABLE_BIT)?;
+    self.set_or_clear_reg_bits(REG_CONTROL1, TIMER_REPEAT_BIT, repeat)?;
 
     self.clear_reg_bits(REG_CONTROL1, TIMER_CLOCK_FREQ_BITS)?;
     self.set_reg_bits(REG_CONTROL1, freq as u8)?;
@@ -600,53 +600,53 @@ impl<I2C, E> RV3028<I2C>
     self.i2c.write(RV3028_ADDRESS, &write_buf)?;
 
     self.clear_reg_bits(REG_STATUS, PERIODIC_TIMER_FLAG)?;
-
     Ok(())
   }
 
   const MAX_PCT_TICKS: u16 = 0x0FFF; // 4095
   const PCT_MILLIS_PERIOD:i64 = 15; // 15.625 ms period
   const PCT_MICROS_PERIOD:i64 = 244; // 244.14 μs period
+
   const MAX_PCT_COUNT:i64 = Self::MAX_PCT_TICKS as i64;
   const MAX_PCT_MILLIS:i64 = Self::MAX_PCT_COUNT * Self::PCT_MILLIS_PERIOD;
   const MAX_PCT_MICROS:i64 = Self::MAX_PCT_COUNT * Self::PCT_MICROS_PERIOD;
+  const PCT_MILLIS_SECOND_BARRIER: i64 =  Self::PCT_MILLIS_PERIOD*(1000/Self::PCT_MILLIS_PERIOD);
 
   // Calculate the closest clock frequency and
-  // number of ticks to match the given duration using the
+  // number of ticks to match the requested duration using the
   // Periodic Countdown Timer (PCT)
-  fn pct_ticks_and_rate_for_duration(dur: &Duration) -> (u16, TimerClockFreq)
+  fn pct_ticks_and_rate_for_duration(duration: &Duration) -> (u16, TimerClockFreq, Duration)
   {
-    let whole_minutes = dur.num_minutes();
-    let whole_seconds = dur.num_seconds();
-    let whole_milliseconds = dur.num_milliseconds();
+    let whole_minutes = duration.num_minutes();
+    let whole_seconds = duration.num_seconds();
+    let whole_milliseconds = duration.num_milliseconds();
     let frac_milliseconds = whole_milliseconds % 1_000;
-    let infrac_millis = whole_milliseconds % Self::PCT_MILLIS_PERIOD;
-    let whole_microseconds = dur.num_microseconds().unwrap();
-    let frac_microseconds = whole_microseconds % 1_000_000;
+    let infrac_milliseconds = whole_milliseconds % Self::PCT_MILLIS_PERIOD;
+    let whole_microseconds = duration.num_microseconds().unwrap();
 
     return if whole_minutes >= Self::MAX_PCT_COUNT {
-      (Self::MAX_PCT_TICKS, TimerClockFreq::HertzSixtieth)
+      (Self::MAX_PCT_TICKS, TimerClockFreq::HertzSixtieth, Duration::minutes(Self::MAX_PCT_COUNT))
     } else if whole_seconds > Self::MAX_PCT_COUNT {
       // use minutes
-      let ticks = (whole_minutes & Self::MAX_PCT_COUNT) as u16;
-      (ticks, TimerClockFreq::HertzSixtieth)
+      let ticks = whole_minutes;
+      (ticks as u16, TimerClockFreq::HertzSixtieth, Duration::minutes(ticks))
     } else if  (whole_milliseconds > Self::MAX_PCT_MILLIS) ||
-      ((0 == frac_milliseconds) && (whole_milliseconds >= 1_000))  {
+      ((0 == frac_milliseconds) && (whole_milliseconds > Self::PCT_MILLIS_SECOND_BARRIER))  {
       // use seconds
-      let ticks = (whole_seconds & Self::MAX_PCT_COUNT) as u16;
-      (ticks, TimerClockFreq::Hertz1)
+      let ticks = whole_seconds;
+      (ticks as u16, TimerClockFreq::Hertz1, Duration::seconds(ticks))
     } else if (whole_microseconds > Self::MAX_PCT_MICROS) ||
-      ((0 == frac_microseconds) && (whole_microseconds > 0)) ||
-      ((0 == infrac_millis) && (whole_milliseconds >= Self::PCT_MILLIS_PERIOD)) {
+      ((0 == infrac_milliseconds) && (whole_milliseconds >= Self::PCT_MILLIS_PERIOD)) {
       // use milliseconds
-      let millis = whole_milliseconds & Self::MAX_PCT_MILLIS;
-      let ticks = (millis / Self::PCT_MILLIS_PERIOD) as u16;
-      (ticks, TimerClockFreq::Hertz64)
+      let ticks = whole_milliseconds / Self::PCT_MILLIS_PERIOD;
+      (ticks as u16, TimerClockFreq::Hertz64,
+       Duration::milliseconds(ticks * Self::PCT_MILLIS_PERIOD))
     } else {
       // use microseconds
-      // let micros = whole_microseconds & Self::MAX_PCT_MICROS;
-      let ticks = (whole_microseconds / Self::PCT_MICROS_PERIOD) as u16;
-      (ticks, TimerClockFreq::Hertz4096)
+      let ticks = whole_microseconds / Self::PCT_MICROS_PERIOD;
+      (ticks as u16, TimerClockFreq::Hertz4096,
+       Duration::microseconds(ticks * Self::PCT_MICROS_PERIOD))
+
     }
 
   }
@@ -656,12 +656,15 @@ impl<I2C, E> RV3028<I2C>
   ///
   /// - `repeat`: If true, the countdown timer will repeat as a periodic timer.
   /// If false, the countdown timer will only run once ("one-shot" mode).
-  ///
+  /// Returns the estimated actual duration (which may vary from the requested duration
+  /// dur to discrete RTC clock ticks).
   pub fn setup_countdown_timer(&mut self, duration: &Duration,
                                repeat: bool
-  )  -> Result<(), E> {
-    let (ticks, freq) = Self::pct_ticks_and_rate_for_duration(duration);
-    self.pct_prep(ticks, freq, repeat)
+  )  -> Result<Duration, E> {
+    let (ticks, freq, estimated) =
+      Self::pct_ticks_and_rate_for_duration(duration);
+    self.pct_prep(ticks, freq, repeat)?;
+    Ok(estimated)
   }
 
   /// Set whether the Periodic Countdown Timer mode is repeating (periodic) or one-shot.
@@ -670,7 +673,14 @@ impl<I2C, E> RV3028<I2C>
     self.set_or_clear_reg_bits(REG_CONTROL1, TIMER_ENABLE_BIT, enable)
   }
 
-  /// Check whether countdown timer has finished counting down
+  /// Check whether the Periodic Countdown Timer has finished
+  pub fn check_countdown_finished(&mut self) -> Result<bool, E> {
+    let reg_val = self.read_register(REG_STATUS)?;
+    let flag_set =  0 != (reg_val & PERIODIC_TIMER_FLAG); // Check if the TF flag is set
+    Ok(flag_set)
+  }
+
+  /// Check whether countdown timer has finished counting down, and clear it
   pub fn check_and_clear_countdown(&mut self) -> Result<bool, E> {
     let reg_val = self.read_register(REG_STATUS)?;
     let flag_set =  0 != (reg_val & PERIODIC_TIMER_FLAG); // Check if the TF flag is set
@@ -877,128 +887,177 @@ mod tests {
     assert_eq!(rv3028.get_unix_time().unwrap(), unix_time);
   }
 
+  // The duration requested should exactly match the duration the RTC can deliver with
+  // pct_ticks_and_rate_for_duration
+  fn verify_whole_time_estimate(duration: &Duration, known_freq: TimerClockFreq, known_ticks: u16) {
+    let (ticks, freq, estimated) =
+      TestClass::pct_ticks_and_rate_for_duration(&duration);
+    assert_eq!(freq, known_freq);
+    assert_eq!(ticks, known_ticks);
+    assert_eq!(*duration, estimated);
+  }
+
+  // We know that the RTC can't precisely match the requested duration with
+  // pct_ticks_and_rate_for_duration, so just match ticks
+  fn verify_ticks_and_freq(duration: &Duration, known_freq: TimerClockFreq, known_ticks: u16) {
+    let (ticks, freq, _estimated) =
+      TestClass::pct_ticks_and_rate_for_duration(&duration);
+    assert_eq!(freq, known_freq);
+    assert_eq!(ticks, known_ticks);
+    // assert_eq!(*duration, estimated); // TODO calculate
+  }
+
   #[test]
   fn test_countdown_timer_conversion_minutes() {
     // should be fulfilled as minutes
-    let known_rate = TimerClockFreq::HertzSixtieth;
+    let minutes_clock_freq = TimerClockFreq::HertzSixtieth;
 
-    let (ticks, freq) =
-      TestClass::pct_ticks_and_rate_for_duration(
-        &Duration::minutes(TestClass::MAX_PCT_COUNT + 32));
-    assert_eq!(ticks, TestClass::MAX_PCT_TICKS);
-    assert_eq!(freq, known_rate);
+    // request a longer countdown than th RTC can fulfill
+    verify_ticks_and_freq(
+      &Duration::minutes(TestClass::MAX_PCT_COUNT + 32),
+      minutes_clock_freq, TestClass::MAX_PCT_TICKS);
 
-    let (ticks, freq) =
-      TestClass::pct_ticks_and_rate_for_duration(&Duration::minutes(TestClass::MAX_PCT_COUNT ));
-    assert_eq!(ticks, TestClass::MAX_PCT_TICKS);
-    assert_eq!(freq, known_rate);
+    verify_whole_time_estimate(
+      &Duration::minutes(TestClass::MAX_PCT_COUNT),
+      minutes_clock_freq, TestClass::MAX_PCT_TICKS);
 
-    let (_ticks, freq) =
-      TestClass::pct_ticks_and_rate_for_duration(&Duration::minutes(1024));
-    assert_eq!(freq, known_rate);
+    // exceed the Seconds counter just slightly to invoke Minutes counter
+    const MAX_SECONDS_IN_MINUTES: i64 = (TestClass::MAX_PCT_COUNT/ 60) + 1;
+    verify_whole_time_estimate(
+      &Duration::minutes(MAX_SECONDS_IN_MINUTES),
+      minutes_clock_freq, MAX_SECONDS_IN_MINUTES as u16);
+
+    verify_whole_time_estimate(
+      &Duration::minutes(2047),
+      minutes_clock_freq, 2047);
 
   }
 
   #[test]
   fn test_countdown_timer_conversion_seconds() {
     // should be fulfilled as seconds
-    let known_rate = TimerClockFreq::Hertz1;
+    let seconds_clock_freq = TimerClockFreq::Hertz1;
 
-    let (ticks, freq) =
-      TestClass::pct_ticks_and_rate_for_duration(&Duration::seconds(TestClass::MAX_PCT_COUNT));
-    assert_eq!(freq, known_rate);
-    assert_eq!(ticks, TestClass::MAX_PCT_TICKS);
+    // Maximum seconds ticks
+    verify_whole_time_estimate(
+      &Duration::seconds(TestClass::MAX_PCT_COUNT),
+      seconds_clock_freq, TestClass::MAX_PCT_TICKS);
 
-    let (ticks, freq) =
-      TestClass::pct_ticks_and_rate_for_duration(&Duration::seconds(1024));
-    assert_eq!(freq, known_rate);
-    assert_eq!(ticks, 1024);
+    verify_whole_time_estimate(
+      &Duration::seconds(2047),
+      seconds_clock_freq, 2047);
 
-    let (ticks, freq) =
-      TestClass::pct_ticks_and_rate_for_duration(&Duration::seconds(61));
-    assert_eq!(freq, known_rate);
-    assert_eq!(ticks, 61);
+    verify_whole_time_estimate(
+      &Duration::seconds(61),
+      seconds_clock_freq, 61);
 
-    let (ticks, freq) =
-      TestClass::pct_ticks_and_rate_for_duration(&Duration::seconds(60));
-    assert_eq!(freq, known_rate);
-    assert_eq!(ticks, 60);
+    // we serve whole minutes (under max seconds) with a seconds countdown
+    verify_whole_time_estimate(
+      &Duration::seconds(60),
+      seconds_clock_freq, 60);
 
-    let (ticks, freq) =
-      TestClass::pct_ticks_and_rate_for_duration(&Duration::minutes(1));
-    assert_eq!(freq, known_rate);
-    assert_eq!(ticks, 60);
+    verify_whole_time_estimate(
+      &Duration::minutes(1),
+      seconds_clock_freq, 60);
 
-    let (ticks, freq) =
-      TestClass::pct_ticks_and_rate_for_duration(&Duration::minutes(45));
-    assert_eq!(freq, known_rate);
-    assert_eq!(ticks, 45*60);
+    verify_whole_time_estimate(
+      &Duration::minutes(45),
+      seconds_clock_freq, 45*60);
 
-    let (ticks, freq) =
-      TestClass::pct_ticks_and_rate_for_duration(&Duration::seconds(1));
-    assert_eq!(freq, known_rate);
-    assert_eq!(ticks, 1);
+    // minimum Seconds ticks
+    verify_whole_time_estimate(
+      &Duration::seconds(1),
+      seconds_clock_freq, 1);
+
+  }
+
+  #[test]
+  fn test_countdown_timer_conversion_micros() {
+    // should be fulfilled as microseconds
+    let micros_clock_freq = TimerClockFreq::Hertz4096;
+
+    verify_whole_time_estimate(
+      &Duration::microseconds(TestClass::MAX_PCT_MICROS),
+      micros_clock_freq, TestClass::MAX_PCT_TICKS);
+
+    verify_ticks_and_freq(
+      &Duration::microseconds(2048),
+      micros_clock_freq, (2048 / TestClass::PCT_MICROS_PERIOD) as u16);
+
+    verify_ticks_and_freq(
+      &Duration::microseconds(655),
+      micros_clock_freq, (655 / TestClass::PCT_MICROS_PERIOD) as u16);
+
+    verify_ticks_and_freq(
+      &Duration::microseconds(1024),
+      micros_clock_freq, (1024 / TestClass::PCT_MICROS_PERIOD) as u16);
+
+    // some exact micros values
+
+    verify_whole_time_estimate(
+      &Duration::microseconds(999*TestClass::PCT_MICROS_PERIOD),
+      micros_clock_freq, 999);
+
+    verify_whole_time_estimate(
+      &Duration::microseconds(100*TestClass::PCT_MICROS_PERIOD),
+      micros_clock_freq, 100);
+
+    verify_whole_time_estimate(
+      &Duration::microseconds(17*TestClass::PCT_MICROS_PERIOD),
+      micros_clock_freq, 17);
+
+    // minimum microseconds tick
+    verify_whole_time_estimate(
+      &Duration::microseconds(TestClass::PCT_MICROS_PERIOD),
+      micros_clock_freq, 1);
+
   }
 
   #[test]
   fn test_countdown_timer_conversion_millis() {
     // should be fulfilled as milliseconds
-    let known_rate = TimerClockFreq::Hertz64;
+    let millis_clock_freq = TimerClockFreq::Hertz64;
+
+    // a bit more than max micros counter, but less than max millis counter
+    verify_ticks_and_freq(
+      &Duration::microseconds(TestClass::MAX_PCT_MICROS + 1),
+      millis_clock_freq,
+      ((TestClass::MAX_PCT_MICROS + 1) / (TestClass::PCT_MILLIS_PERIOD * 1_000)) as u16
+    );
 
     // maximum millis counter
-    let (ticks, freq) =
-      TestClass::pct_ticks_and_rate_for_duration(
-        &Duration::milliseconds(TestClass::MAX_PCT_MILLIS));
-    assert_eq!(freq, known_rate);
-    assert_eq!(ticks, TestClass::MAX_PCT_TICKS);
+    verify_whole_time_estimate(
+      &Duration::milliseconds(TestClass::MAX_PCT_MILLIS),
+      millis_clock_freq, TestClass::MAX_PCT_TICKS);
 
-    let (ticks, freq) =
-      TestClass::pct_ticks_and_rate_for_duration(&Duration::milliseconds(1024));
-    assert_eq!(freq, known_rate);
-    assert_eq!(ticks as i64, 1024/TestClass::PCT_MILLIS_PERIOD);
+    // mid-value millis
+    verify_ticks_and_freq(
+      &Duration::milliseconds(2047),
+      millis_clock_freq, (2047 / TestClass::PCT_MILLIS_PERIOD) as u16);
 
-    // just a smidge more than what the micros counter can support
-    let (_ticks, freq) =
-      TestClass::pct_ticks_and_rate_for_duration(
-        &Duration::microseconds(TestClass::MAX_PCT_MICROS + 1));
-    assert_eq!(freq, known_rate);
+    // exactly on the seconds clock
+    verify_whole_time_estimate(
+      &Duration::milliseconds(1000*TestClass::PCT_MILLIS_PERIOD),
+      TimerClockFreq::Hertz1, TestClass::PCT_MILLIS_PERIOD as u16 );
 
-    // exactly on the millis counter
-    let (_ticks, freq) =
-      TestClass::pct_ticks_and_rate_for_duration(
-        &Duration::milliseconds(66*TestClass::PCT_MILLIS_PERIOD));
-    assert_eq!(freq, known_rate);
-    assert_eq!(ticks, 66); //TODO fix
+    // exactly on the millis period
 
-  }
-  #[test]
-  fn test_countdown_timer_conversion_micros() {
-    // should be fulfilled as microseconds
-    let known_rate = TimerClockFreq::Hertz4096;
+    verify_whole_time_estimate(
+      &Duration::milliseconds(999*TestClass::PCT_MILLIS_PERIOD),
+      millis_clock_freq, 999);
 
-    let (ticks, freq) =
-      TestClass::pct_ticks_and_rate_for_duration(
-        &Duration::microseconds(TestClass::MAX_PCT_MICROS));
-    assert_eq!(freq, known_rate);
-    assert_eq!(ticks, TestClass::MAX_PCT_TICKS);
+    verify_whole_time_estimate(
+      &Duration::milliseconds(100*TestClass::PCT_MILLIS_PERIOD),
+      millis_clock_freq, 100);
 
-    let (ticks, freq) =
-      TestClass::pct_ticks_and_rate_for_duration(&Duration::microseconds(2048));
-    assert_eq!(freq, known_rate);
-    assert_eq!(ticks as i64, 2048/TestClass::PCT_MICROS_PERIOD);
-
-    let (ticks, freq) =
-      TestClass::pct_ticks_and_rate_for_duration(&Duration::microseconds(655));
-    assert_eq!(freq, known_rate);
-    assert_eq!(ticks as i64, 655/TestClass::PCT_MICROS_PERIOD);
-
-    let (ticks, freq) =
-      TestClass::pct_ticks_and_rate_for_duration(&Duration::microseconds(1024));
-    assert_eq!(freq, known_rate);
-    assert_eq!(ticks as i64, 1024/TestClass::PCT_MICROS_PERIOD);
+    // minimum millis ticks
+    verify_whole_time_estimate(
+      &Duration::milliseconds(TestClass::PCT_MILLIS_PERIOD),
+      millis_clock_freq, 1);
 
   }
 
 
-  }
+
+}
 
