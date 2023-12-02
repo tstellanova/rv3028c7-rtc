@@ -1,7 +1,7 @@
 extern crate rv3028c7_rtc;
 
 use linux_embedded_hal::I2cdev;
-use chrono::{NaiveDateTime, Utc};
+use chrono::{Utc};
 use rv3028c7_rtc::{RV3028, TrickleChargeCurrentLimiter};
 use rtcc::DateTimeAccess;
 
@@ -39,7 +39,7 @@ fn main() {
     let dt1 = rtc1.datetime().unwrap();
     let dt2 = rtc2.datetime().unwrap();
     let sys_dt = Utc::now().naive_utc();
-    println!("start sys {} rtc1 {} rtc2 {}", sys_dt, dt1, dt2);
+    println!("start sys {}\r\nrtc1 {}\r\nrtc2 {}", sys_dt, dt1, dt2);
 
     // enable trickle charging on both
     let one_enabled = rtc1.toggle_trickle_charge(
@@ -47,13 +47,13 @@ fn main() {
     let two_enabled = rtc2.toggle_trickle_charge(
         true, TrickleChargeCurrentLimiter::Ohms15k).unwrap();
 
-    println!("rtc1 enabled: {} rtc2 enabled: {}",one_enabled, two_enabled);
+    println!("rtc1 enabled: {}\r\nrtc2 enabled: {}",one_enabled, two_enabled);
 
     // disable on both
     let one_enabled = rtc1.toggle_trickle_charge(
         false, TrickleChargeCurrentLimiter::Ohms3k).unwrap();
     let two_enabled = rtc2.toggle_trickle_charge(
         false, TrickleChargeCurrentLimiter::Ohms3k).unwrap();
-    println!("rtc1 enabled: {} rtc2 enabled: {}",one_enabled, two_enabled);
+    println!("rtc1 enabled: {}\r\nrtc2 enabled: {}",one_enabled, two_enabled);
 
 }

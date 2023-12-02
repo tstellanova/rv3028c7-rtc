@@ -38,9 +38,9 @@ via an i2c mux (something like the TCA9548A)
 ## Testing
 
 ```
-cargo test --tests
+RUST_BACKTRACE=1 cargo test --tests
 ```
-This will build and run only the tests, on any host platform. 
+This will build and run _only_ the tests, on any host platform. 
 These tests do not require a real hardware RTC to be connected to the host. 
 Note that plain `cargo test` currently also builds all examples,
 and if you're testing on a non-linux platform the `linux_embedded_hal`-based examples will fail to build. 

@@ -1,9 +1,8 @@
 #![cfg_attr(not(test), no_std)]
 
 
-
 pub use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike, Weekday};
-use chrono::NaiveTime;
+use chrono::{Duration, NaiveTime};
 pub use rtcc::{  DateTimeAccess };
 
 use embedded_hal::blocking::i2c::{Write, Read, WriteRead};
@@ -11,10 +10,10 @@ use embedded_hal::blocking::i2c::{Write, Read, WriteRead};
 // Fixed i2c bus address of the device (7-bit)
 const RV3028_ADDRESS: u8 = 0xA4 >> 1;
 
-// Register addresses
+// Main time register addresses
 const REG_SECONDS: u8 = 0x00;
-const REG_MINUTES: u8 = 0x01;
-const REG_HOURS: u8 = 0x02;
+// const REG_MINUTES: u8 = 0x01;
+// const REG_HOURS: u8 = 0x02;
 
 
 // Holds the current day of the week.
@@ -30,16 +29,14 @@ const REG_DATE: u8 = 0x04;
 
 // Holds the current month, in two binary coded decimal (BCD) digits.
 // Values will range from 01 to 12.
-const REG_MONTH: u8 = 0x05;
-const REG_YEAR: u8 = 0x06;
-
+// const REG_MONTH: u8 = 0x05;
+// const REG_YEAR: u8 = 0x06;
 
 // Holds the Minutes Alarm Enable bit AE_M,
 // and the alarm value for minutes,
 // in two binary coded decimal (BCD) digits.
 // Values will range from 00 to 59.
 const REG_MINUTES_ALARM: u8 = 0x07;
-
 
 // Holds the Hours Alarm Enable bit AE_H and the alarm value for hours,
 // in two binary coded decimal (BCD) digits.
@@ -59,8 +56,22 @@ const REG_HOURS_ALARM: u8 = 0x08;
 // digits. Values will range from 01 to 31.
 const REG_WEEKDAY_DATE_ALARM: u8 = 0x09;
 
-// 0Ah – Timer Value 0
-// 0Bh – Timer Value 1
+// This register is used to set the lower 8 bits of the 12 bit Timer Value (preset value)
+// for the Periodic Countdown Timer.
+// This value will be automatically reloaded into the Countdown Timer when it reaches zero
+// If the TRPT bit is 1, this value will be automatically reloaded into the Countdown Timer
+// when it reaches zero: this allows for periodic timer interrupts
+const REG_TIMER_VALUE0: u8 = 0x0A;
+
+// This register is used to set the upper 4 bits of the 12 bit Timer Value (preset value)
+// for the Periodic Countdown Timer.
+// If the TRPT bit is 1, this value will be automatically reloaded into the Countdown Timer
+// when it reaches zero: this allows for periodic timer interrupts
+// const REG_TIMER_VALUE1: u8 = 0x0B;
+
+const REG_TIMER_STATUS0: u8 = 0x0C; // Read-only lower 8 bits of Periodic Countdown Timer
+// const REG_TIMER_STATUS1: u8 = 0x0D; // Read-only upper 4 bits of Periodic Countdown Timer
+
 
 // This register is used to detect the occurrence of various interrupt events
 // and reliability problems in internal data.
@@ -99,16 +110,31 @@ const REG_UNIX_TIME_0: u8 = 0x1B;
 // const REG_UNIX_TIME_3: u8 = 0x1E;
 
 // REG_CONTROL1 "Control 1" register bits:
-const WADA_BIT: u8 = 1 << 5; // Weekday Alarm / Date Alarm selection bit WADA
+const TIMER_REPEAT_BIT: u8 = 1 << 7;// TRPT / Timer Repeat bit. Single or Repeat countdown timer
+const WADA_BIT: u8 = 1 << 5; // WADA / Weekday Alarm / Date Alarm selection bit
 // const USEL_BIT: u8 = 1 << 4;
 // const EERD_BIT: u8 = 1 << 3;
+const TIMER_ENABLE_BIT: u8 = 1 << 2; // TE / Periodic Countdown Timer Enable bit.
+const TIMER_CLOCK_FREQ_BITS: u8 = 0b11; // TD / Timer Clock Frequency selection bits
 
+/// Countown timer clock frequency selector
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum TimerClockFreq {
+  Hertz4096 = 0b00, // 4096 Hz, 244.14 μs period
+  Hertz64 = 0b01, // 64 Hz, 15.625 ms period
+  Hertz1 = 0b10, // 1 Hz, One second period
+  HertzSixtieth = 0b11, // 1/60 Hz, One minute period
+}
 
 // REG_STATUS Status register bits:
 // const EEBUSY_BIT: u8 = 1 << 7;
+const CLOCK_INT_FLAG_BIT: u8 = 1 << 6; // CLKF  / Clock Output Interrupt Flag
 const BACKUP_SWITCH_FLAG: u8 = 1 << 4; // BSF bit
+const PERIODIC_TIMER_FLAG: u8 = 1 << 3; // TF bit / Periodic Countdown Timer Flag
 const ALARM_FLAG_BIT : u8 = 1 << 2; // AF / Alarm Flag
-const EVENT_FLAG_BIT: u8 = 1 << 1; // EVF / Event Flag
+const EVENT_FLAG_BIT: u8 = 1 << 1; // EVF / Event Flag (external event interrupt)
+
+
 
 // EEPROM register addresses and commands
 const EEPROM_MIRROR_ADDRESS: u8 = 0x37;// RAM mirror of EEPROM config values
@@ -127,24 +153,26 @@ pub const TS_EVENT_SOURCE_BSF: u8 = 1; /// Event log source is backup power swit
 
 // REG_CONTROL2 "Control 2" register bits: TSE CLKIE UIE TIE AIE EIE 12_24 RESET
 const TIME_STAMP_ENABLE_BIT: u8 = 1 << 7; // TSE / Time Stamp Enable bit
+const TIME_UPDATE_INT_ENABLE_BIT: u8 = 1 << 5; // UIE / Time Update Interrupt Enable
+const TIMER_INT_ENABLE_BITL: u8 = 1 << 4;// TIE Countdown Timer Interrupt Enable bit
 const ALARM_INT_ENABLE_BIT: u8 = 1 << 3;// AIE / Alarm Interrupt Enable bit
 const EVENT_INT_ENABLE_BIT: u8 = 1 << 2;// EIE / Event Interrupt Enable bit
 
-
-// EEPROM register bits:
+// EEPROM_MIRROR_ADDRESS / EEPROM mirror register bits:
+const CLOCK_OUT_ENABLE_BIT:u8 = 1<< 7; // CLKOE / CLKOUT Enable bit
+const BACKUP_SWITCH_INT_ENABLE_BIT:u8 = 1 << 6; // BCIE / Backup Switchover Interrupt Enable bit bit
 const TRICKLE_CHARGE_ENABLE_BIT: u8 = 1 << 5; // TCE bit
+const BACKUP_SWITCHOVER_BITS:  u8  = 0b11 << 2; // Backup Switchover Mode / BSM bits
+const BACKUP_SWITCHOVER_DSM:  u8  = 0b01 << 2; // Backup Switchover Mode / BSM bits as DSM
+
 const TRICKLE_CHARGE_RESISTANCE_BITS: u8 = 0b11; // TCR bits
+#[derive(Clone, Copy)]
 pub enum TrickleChargeCurrentLimiter {
   Ohms3k = 0b00,
   Ohms5k = 0b01,
   Ohms9k = 0b10,
   Ohms15k = 0b11,
 }
-// pub const TRICKLE_CHARGE_RESISTANCE_VALUE_3K: u8 = 0b00;
-// pub const TRICKLE_CHARGE_RESISTANCE_VALUE_5K: u8 = 0b01;
-// pub const TRICKLE_CHARGE_RESISTANCE_VALUE_9K: u8 = 0b10;
-// pub const TRICKLE_CHARGE_RESISTANCE_VALUE_15K: u8 = 0b11;
-
 
 // Special alarm register value
 const ALARM_NO_WATCH_FLAG: u8 = 1 <<  7;
@@ -206,17 +234,28 @@ impl<I2C, E> RV3028<I2C>
     }
   }
 
-  fn write_register(&mut self, reg: u8, data: u8) -> Result<(), E> {
-    self.select_mux_channel()?;
+  // fn write_register(&mut self, reg: u8, data: u8) -> Result<(), E> {
+  //   self.select_mux_channel()?;
+  //   self.write_register_raw(reg, data)
+  // }
+
+  fn write_register_raw(&mut self, reg: u8, data: u8) -> Result<(), E> {
     self.i2c.write(RV3028_ADDRESS, &[reg, data])
   }
 
-  fn read_register(&mut self, reg: u8) -> Result<u8, E> {
-    self.select_mux_channel()?;
+  // fn read_register(&mut self, reg: u8) -> Result<u8, E> {
+  //   self.select_mux_channel()?;
+  //   self.read_register_raw(reg)
+  // }
+
+  fn read_register_raw(&mut self, reg: u8) -> Result<u8, E> {
     let mut buf = [0];
     self.i2c.write_read(RV3028_ADDRESS, &[reg], &mut buf)?;
     Ok(buf[0])
   }
+
+  //clear_register
+
 
   // TODO these methods have not been thoroughly tested, and are believed broken.
   // fn is_eeprom_busy(&mut self) -> Result<bool, E> {
@@ -259,17 +298,31 @@ impl<I2C, E> RV3028<I2C>
   // set specific bits in a register:
   // all bits must be high that you wish to set
   fn set_reg_bits(&mut self, reg: u8, bits: u8) -> Result<(), E> {
-    let mut reg_val = self.read_register(reg)?;
+    self.select_mux_channel()?;
+    self.set_reg_bits_raw(reg, bits)
+  }
+
+  // set specific bits in a register: skips the mux
+  // all bits must be high that you wish to set
+  fn set_reg_bits_raw(&mut self, reg: u8, bits: u8) -> Result<(), E> {
+    let mut reg_val = self.read_register_raw(reg)?;
     reg_val |= bits; // Set bits that are high
-    self.write_register(reg, reg_val)
+    self.write_register_raw(reg, reg_val)
   }
 
   // clear specific bits in a register:
   // all bits must be high that you wish to be cleared
   fn clear_reg_bits(&mut self, reg: u8, bits: u8) -> Result<(), E> {
-    let mut reg_val = self.read_register(reg)?;
+    self.select_mux_channel()?;
+    self.clear_reg_bits_raw(reg,bits)
+  }
+
+  // clear specific bits in a register, skips the mux
+  // all bits must be high that you wish to be cleared
+  fn clear_reg_bits_raw(&mut self, reg: u8, bits: u8) -> Result<(), E> {
+    let mut reg_val = self.read_register_raw(reg)?;
     reg_val &= !(bits); // Clear  bits that are high
-    self.write_register(reg, reg_val)
+    self.write_register_raw(reg, reg_val)
   }
 
   /// Enable or disable trickle charging
@@ -279,32 +332,46 @@ impl<I2C, E> RV3028<I2C>
   /// Returns the status of trickle charging (true for enabled, false for disabled)
   pub fn toggle_trickle_charge(&mut self, enable: bool,
                                limit_resistance: TrickleChargeCurrentLimiter) -> Result<bool, E>  {
+    self.select_mux_channel()?;
+
     // First disable charging before changing settings
-    self.clear_reg_bits(EEPROM_MIRROR_ADDRESS,  TRICKLE_CHARGE_ENABLE_BIT)?;
+    self.clear_reg_bits_raw(EEPROM_MIRROR_ADDRESS,  TRICKLE_CHARGE_ENABLE_BIT)?;
     // Reset TCR to 3 kΩ, the factory default, by clearing the TCR bits
-    self.clear_reg_bits(EEPROM_MIRROR_ADDRESS,  TRICKLE_CHARGE_RESISTANCE_BITS )?;
+    self.clear_reg_bits_raw(EEPROM_MIRROR_ADDRESS,  TRICKLE_CHARGE_RESISTANCE_BITS )?;
 
     if enable {
-      self.set_reg_bits(EEPROM_MIRROR_ADDRESS, limit_resistance as u8)?;
-      self.set_reg_bits(EEPROM_MIRROR_ADDRESS, TRICKLE_CHARGE_ENABLE_BIT)?;
+      self.set_reg_bits_raw(EEPROM_MIRROR_ADDRESS, limit_resistance as u8)?;
+      self.set_reg_bits_raw(EEPROM_MIRROR_ADDRESS, TRICKLE_CHARGE_ENABLE_BIT)?;
     }
 
     // confirm the value set
     let conf_val =
-      0 != self.read_register(EEPROM_MIRROR_ADDRESS)? & TRICKLE_CHARGE_ENABLE_BIT;
+      0 != self.read_register_raw(EEPROM_MIRROR_ADDRESS)? & TRICKLE_CHARGE_ENABLE_BIT;
     Ok(conf_val)
   }
 
+  /// Toggle whether the Vbackup power source should be used
+  /// when Vdd supply level drops below useful level.
+  /// - `enable` enables switching to Vbackup, disables if false
+  /// Returns the set value
+  pub fn toggle_backup_switchover(&mut self, enable: bool) -> Result<bool, E> {
+    self.select_mux_channel()?;
+    self.set_or_clear_reg_bits_raw( EEPROM_MIRROR_ADDRESS, BACKUP_SWITCHOVER_DSM, enable)?;
+    let conf_val =
+      0 != self.read_register_raw(EEPROM_MIRROR_ADDRESS)? & BACKUP_SWITCHOVER_DSM;
+    Ok(conf_val)
+  }
 
   /// Get the current value of the EEPROM mirror from RAM
   pub fn get_eeprom_mirror_value(&mut self) -> Result<u8, E> {
-    let reg_val = self.read_register(EEPROM_MIRROR_ADDRESS)?;
+    self.select_mux_channel()?;
+    let reg_val = self.read_register_raw(EEPROM_MIRROR_ADDRESS)?;
     Ok(reg_val)
   }
 
   // Set the bcd time tracking registers
   // assumes `select_mux_channel` has already been called
-  fn set_time(&mut self, time: &NaiveTime) -> Result<(), E> {
+  fn set_time_raw(&mut self, time: &NaiveTime) -> Result<(), E> {
     let write_buf = [
       REG_SECONDS, // select the first register
       Self::bin_to_bcd(time.second() as u8 ),
@@ -312,17 +379,13 @@ impl<I2C, E> RV3028<I2C>
       Self::bin_to_bcd(time.hour() as u8 )
     ];
     self.i2c.write(RV3028_ADDRESS, &write_buf)
-
-    // self.write_register(REG_HOURS, Self::bin_to_bcd(time.hour() as u8))?;
-    // self.write_register(REG_MINUTES, Self::bin_to_bcd(time.minute() as u8))?;
-    // self.write_register(REG_SECONDS, Self::bin_to_bcd(time.second() as u8))
   }
 
 
   // Set the internal BCD date registers.
   // Note that only years from 2000 to 2099 are supported.
   // Assumes `select_mux_channel` has already been called
-  fn set_date(&mut self, date: &NaiveDate) -> Result<(), E> {
+  fn set_date_raw(&mut self, date: &NaiveDate) -> Result<(), E> {
     let year = if date.year() > 2000 { (date.year() - 2000) as u8} else {0};
     let month = (date.month() % 13) as u8;
     let day = (date.day() % 32) as u8;
@@ -336,34 +399,37 @@ impl<I2C, E> RV3028<I2C>
       Self::bin_to_bcd(year )
     ];
     self.i2c.write(RV3028_ADDRESS, &write_buf)
-
-    // self.write_register(REG_WEEKDAY, Self::bin_to_bcd(weekday))?;
-    // self.write_register(REG_DATE, Self::bin_to_bcd(day))?;
-    // self.write_register(REG_MONTH, Self::bin_to_bcd(month))?;
-    // self.write_register(REG_YEAR, Self::bin_to_bcd(year))?;
-
   }
 
   /// Get the year, month, day from the internal BCD registers
   pub fn get_ymd(&mut self) -> Result<(i32, u8, u8), E> {
-    // TODO use read_multi_registers
-    let year: i32 = Self::bcd_to_bin( self.read_register(REG_YEAR)? ) as i32 + 2000;
-    let month = Self::bcd_to_bin(self.read_register(REG_MONTH)?);
-    let day = Self::bcd_to_bin(self.read_register(REG_DATE)?);
+    let mut read_buf = [0u8;3];
+    self.read_multi_registers(REG_DATE, &mut read_buf)?;
+    let day = Self::bcd_to_bin(read_buf[0]);
+    let month = Self::bcd_to_bin(read_buf[1]);
+    let year:i32 = Self::bcd_to_bin(read_buf[2]) as i32 + 2000;
+
     Ok((year, month, day))
   }
 
   /// Get the hour, minute, second from the internal BCD registers
   pub fn get_hms(&mut self) -> Result<(u8, u8, u8), E> {
-    let hours = Self::bcd_to_bin( self.read_register(REG_HOURS)?);
-    let minutes = Self::bcd_to_bin(self.read_register(REG_MINUTES)?);
-    let seconds = Self::bcd_to_bin(self.read_register(REG_SECONDS)?);
+    let mut read_buf = [0u8;3];
+    self.read_multi_registers(REG_SECONDS, &mut read_buf)?;
+    let seconds = Self::bcd_to_bin(read_buf[0]);
+    let minutes = Self::bcd_to_bin(read_buf[1]);
+    let hours = Self::bcd_to_bin(read_buf[2]);
     Ok( (hours, minutes, seconds) )
   }
 
   // read a block of registers all at once
   fn read_multi_registers(&mut self, reg: u8, read_buf: &mut [u8] )  -> Result<(), E> {
     self.select_mux_channel()?;
+    self.read_multi_registers_raw(reg, read_buf)
+  }
+
+  // read a block of registers all at once: skip mux
+  fn read_multi_registers_raw(&mut self, reg: u8, read_buf: &mut [u8] )  -> Result<(), E> {
     self.i2c.write_read(RV3028_ADDRESS, &[reg], read_buf)
   }
 
@@ -378,6 +444,11 @@ impl<I2C, E> RV3028<I2C>
   ///
   pub fn set_unix_time(&mut self, unix_time: u32) -> Result<(), E> {
     self.select_mux_channel()?;
+    self.set_unix_time_raw(unix_time)
+  }
+
+  // sets the unix time counter but skips the mux
+  fn set_unix_time_raw(&mut self, unix_time: u32) -> Result<(), E> {
     let bytes = unix_time.to_le_bytes(); // Convert to little-endian byte array
     self.i2c.write(RV3028_ADDRESS, &[REG_UNIX_TIME_0, bytes[0], bytes[1], bytes[2], bytes[3]])
   }
@@ -430,15 +501,16 @@ impl<I2C, E> RV3028<I2C>
     self.set_or_clear_reg_bits(REG_CONTROL2, EVENT_INT_ENABLE_BIT, enable)
   }
 
-
   /// Check the alarm status, and if it's triggered, clear it
   /// return bool indicating whether the alarm triggered
   pub fn check_and_clear_alarm(&mut self) -> Result<bool, E> {
-    let reg_val = self.read_register(REG_STATUS)?;
-    let alarm_flag_set =  0 != (reg_val & ALARM_FLAG_BIT); // Check if the AF flag is set
-    if alarm_flag_set {
-      self.clear_reg_bits(REG_STATUS, ALARM_FLAG_BIT)?;
-    }
+    // Check if the AF flag is set
+    let alarm_flag_set = 0 != self.check_and_clear_bits(REG_STATUS, ALARM_FLAG_BIT)?;
+    // let reg_val = self.read_register(REG_STATUS)?;
+    // let alarm_flag_set =  0 != (reg_val & ALARM_FLAG_BIT); // Check if the AF flag is set
+    // if alarm_flag_set {
+    //   self.clear_reg_bits(REG_STATUS, ALARM_FLAG_BIT)?;
+    // }
     Ok(alarm_flag_set)
   }
 
@@ -452,51 +524,47 @@ impl<I2C, E> RV3028<I2C>
   pub fn set_alarm(&mut self, datetime: &NaiveDateTime,
                    weekday: Option<Weekday>, match_day: bool, match_hour: bool, match_minute: bool) -> Result<(), E> {
 
+    self.select_mux_channel()?;
     // Initialize AF to 0; AIE/ALARM_INT_ENABLE_BIT is managed independently
-    self.clear_reg_bits(REG_STATUS, ALARM_FLAG_BIT)?;
+    self.clear_reg_bits_raw(REG_STATUS, ALARM_FLAG_BIT)?;
 
     // Procedure suggested by App Notes:
     // 1. Initialize bits AIE and AF to 0.
-    // 2. Choose weekday alarm or date alarm (weekday/date) by setting the WADA bit. WADA = 0 for weekday alarm
-    // or WADA = 1 for date alarm.
+    // 2. Choose weekday alarm or date alarm (weekday/date) by setting the WADA bit.
+    // WADA = 0 for weekday alarm or WADA = 1 for date alarm.
     // 3. Write the desired alarm settings in registers 07h to 09h. The three alarm enable bits, AE_M, AE_H and
     // AE_WD, are used to select the corresponding register that has to be taken into account for match or not.
     // See the following table.
 
-
     // Clear WADA for weekday alarm, or set for date alarm
-    self.set_or_clear_reg_bits(REG_CONTROL1, WADA_BIT, !weekday.is_some())?;
+    self.set_or_clear_reg_bits_raw(REG_CONTROL1, WADA_BIT, !weekday.is_some())?;
 
     let bcd_minute = Self::bin_to_bcd(datetime.time().minute() as u8);
-    self.write_register(REG_MINUTES_ALARM,
+    self.write_register_raw(REG_MINUTES_ALARM,
                         if match_minute { bcd_minute }
                         else { ALARM_NO_WATCH_FLAG | bcd_minute })?;
 
     let bcd_hour = Self::bin_to_bcd(datetime.time().hour() as u8);
-    self.write_register(REG_HOURS_ALARM,
+    self.write_register_raw(REG_HOURS_ALARM,
                         if match_hour { bcd_hour  }
                         else { ALARM_NO_WATCH_FLAG | bcd_hour })?;
 
     if let Some(inner_weekday) = weekday {
       let bcd_weekday = Self::bin_to_bcd(inner_weekday as u8);
-      self.write_register(REG_WEEKDAY_DATE_ALARM,
+      self.write_register_raw(REG_WEEKDAY_DATE_ALARM,
                           if match_day { bcd_weekday }
                           else { ALARM_NO_WATCH_FLAG | bcd_weekday }
       )?;
     }
     else {
       let bcd_day = Self::bin_to_bcd(datetime.date().day() as u8);
-      self.write_register(REG_WEEKDAY_DATE_ALARM,
+      self.write_register_raw(REG_WEEKDAY_DATE_ALARM,
                           if match_day { bcd_day }
                           else { ALARM_NO_WATCH_FLAG | bcd_day })?;
     }
 
-
-
-
-
     // Clear AF again in case the above setting process immediately triggered the alarm
-    self.clear_reg_bits(REG_STATUS, ALARM_FLAG_BIT)?;
+    self.clear_reg_bits_raw(REG_STATUS, ALARM_FLAG_BIT)?;
 
     Ok(())
   }
@@ -504,21 +572,23 @@ impl<I2C, E> RV3028<I2C>
   pub fn get_alarm_datetime_wday_matches(&mut self)
     -> Result<(NaiveDateTime, Option<Weekday>, bool, bool, bool), E> {
 
-    let raw_day = self.read_register(REG_WEEKDAY_DATE_ALARM)?;
+    self.select_mux_channel()?;
+
+    let raw_day = self.read_register_raw(REG_WEEKDAY_DATE_ALARM)?;
     let match_day = 0 == (raw_day & ALARM_NO_WATCH_FLAG);
     let day = Self::bcd_to_bin(0x7F & raw_day);
 
-    let raw_hour = self.read_register(REG_HOURS_ALARM)?;
+    let raw_hour = self.read_register_raw(REG_HOURS_ALARM)?;
     let match_hour = 0 == (raw_hour & ALARM_NO_WATCH_FLAG);
     let hour = Self::bcd_to_bin(0x7F & raw_hour);
 
-    let raw_minutes = self.read_register(REG_MINUTES_ALARM)?;
+    let raw_minutes = self.read_register_raw(REG_MINUTES_ALARM)?;
     let match_minutes = 0 == (raw_minutes & ALARM_NO_WATCH_FLAG);
     let minutes = Self::bcd_to_bin(0x7F & raw_minutes);
 
     let mut weekday = None;
 
-    let wada_state = self.read_register(REG_CONTROL1)? & WADA_BIT;
+    let wada_state = self.read_register_raw(REG_CONTROL1)? & WADA_BIT;
 
     let dt =
       if 0 == wada_state {
@@ -544,15 +614,167 @@ impl<I2C, E> RV3028<I2C>
 
   // If `set` is true, set the high bits given in `bits`, otherwise clear those bits
   fn set_or_clear_reg_bits(&mut self, reg: u8, bits: u8, set: bool) -> Result<(), E> {
+    self.select_mux_channel()?;
+    self.set_or_clear_reg_bits_raw(reg, bits, set)
+  }
+
+  fn set_or_clear_reg_bits_raw(&mut self, reg: u8, bits: u8, set: bool) -> Result<(), E> {
     if set {
-      self.set_reg_bits(reg, bits)
+      self.set_reg_bits_raw(reg, bits)
     }
     else {
-      self.clear_reg_bits(reg, bits)
+      self.clear_reg_bits_raw(reg, bits)
     }
   }
 
+  /// Disable all INT pin output selector bits in RAM, excludes PORIE
+  pub fn clear_all_int_out_bits(&mut self) -> Result<(), E> {
+    // UIE, TIE, AIE,  EIE
+    self.clear_reg_bits(REG_CONTROL2,
+                        TIME_UPDATE_INT_ENABLE_BIT | TIMER_INT_ENABLE_BITL |
+                          ALARM_INT_ENABLE_BIT | EVENT_INT_ENABLE_BIT )?;
+    // BSIE
+    self.clear_reg_bits(EEPROM_MIRROR_ADDRESS, BACKUP_SWITCH_INT_ENABLE_BIT)?;
+
+    // PORIE -- must be set in EEPROM -- don't bother to set?
+    Ok(())
+  }
+
+  /// Enables or disables CLKOUT
+  pub fn toggle_clock_output(&mut self, enable: bool)  -> Result<(), E> {
+    self.select_mux_channel()?;
+    self.clear_reg_bits_raw(REG_STATUS, CLOCK_INT_FLAG_BIT)?;
+    self.set_or_clear_reg_bits_raw(EEPROM_MIRROR_ADDRESS, CLOCK_OUT_ENABLE_BIT, enable)
+  }
+
+  // Configure the Periodic Countdown Timer prior to the next countdown.
+  fn pct_prep(&mut self, value: u16, freq: TimerClockFreq,  repeat: bool ) -> Result<(), E> {
+    self.select_mux_channel()?;
+
+    let value_high: u8 = ((value >> 8) as u8) & 0x0F;
+    let value_low: u8 = (value & 0xFF) as u8;
+
+
+    // configure the timer clock source / period
+    self.clear_reg_bits_raw(REG_CONTROL1, TIMER_ENABLE_BIT)?;
+    self.set_or_clear_reg_bits_raw(REG_CONTROL1, TIMER_REPEAT_BIT, repeat)?;
+
+    self.clear_reg_bits_raw(REG_CONTROL1, TIMER_CLOCK_FREQ_BITS)?;
+    self.set_reg_bits_raw(REG_CONTROL1, freq as u8)?;
+
+    // write to REG_TIMER_VALUE0 and REG_TIMER_VALUE1
+    let write_buf = [ REG_TIMER_VALUE0, value_low, value_high];
+    self.i2c.write(RV3028_ADDRESS, &write_buf)?;
+
+    self.clear_reg_bits_raw(REG_STATUS, PERIODIC_TIMER_FLAG)?;
+    Ok(())
+  }
+
+  const MAX_PCT_TICKS: u16 = 0x0FFF; // 4095
+  const PCT_MILLIS_PERIOD:i64 = 15; // 15.625 ms period
+  const PCT_MICROS_PERIOD:i64 = 244; // 244.14 μs period
+
+  const MAX_PCT_COUNT:i64 = Self::MAX_PCT_TICKS as i64;
+  const MAX_PCT_MILLIS:i64 = Self::MAX_PCT_COUNT * Self::PCT_MILLIS_PERIOD;
+  const MAX_PCT_MICROS:i64 = Self::MAX_PCT_COUNT * Self::PCT_MICROS_PERIOD;
+  const PCT_MILLIS_SECOND_BARRIER: i64 =  Self::PCT_MILLIS_PERIOD*(1000/Self::PCT_MILLIS_PERIOD);
+
+  // Calculate the closest clock frequency and
+  // number of ticks to match the requested duration using the
+  // Periodic Countdown Timer (PCT)
+  fn pct_ticks_and_rate_for_duration(duration: &Duration) -> (u16, TimerClockFreq, Duration)
+  {
+    let whole_minutes = duration.num_minutes();
+    let whole_seconds = duration.num_seconds();
+    let whole_milliseconds = duration.num_milliseconds();
+    let frac_milliseconds = whole_milliseconds % 1_000;
+    let infrac_milliseconds = whole_milliseconds % Self::PCT_MILLIS_PERIOD;
+    let whole_microseconds = duration.num_microseconds().unwrap();
+
+    return if whole_minutes >= Self::MAX_PCT_COUNT {
+      (Self::MAX_PCT_TICKS, TimerClockFreq::HertzSixtieth, Duration::minutes(Self::MAX_PCT_COUNT))
+    } else if whole_seconds > Self::MAX_PCT_COUNT {
+      // use minutes
+      let ticks = whole_minutes;
+      (ticks as u16, TimerClockFreq::HertzSixtieth, Duration::minutes(ticks))
+    } else if  (whole_milliseconds > Self::MAX_PCT_MILLIS) ||
+      ((0 == frac_milliseconds) && (whole_milliseconds > Self::PCT_MILLIS_SECOND_BARRIER))  {
+      // use seconds
+      let ticks = whole_seconds;
+      (ticks as u16, TimerClockFreq::Hertz1, Duration::seconds(ticks))
+    } else if (whole_microseconds > Self::MAX_PCT_MICROS) ||
+      ((0 == infrac_milliseconds) && (whole_milliseconds >= Self::PCT_MILLIS_PERIOD)) {
+      // use milliseconds
+      let ticks = whole_milliseconds / Self::PCT_MILLIS_PERIOD;
+      (ticks as u16, TimerClockFreq::Hertz64,
+       Duration::milliseconds(ticks * Self::PCT_MILLIS_PERIOD))
+    } else {
+      // use microseconds
+      let ticks = whole_microseconds / Self::PCT_MICROS_PERIOD;
+      (ticks as u16, TimerClockFreq::Hertz4096,
+       Duration::microseconds(ticks * Self::PCT_MICROS_PERIOD))
+    }
+
+  }
+
+  /// Prepare the Periodic Countdown Timer for a countdown,
+  /// but don't start it counting down yet.
+  ///
+  /// - `repeat`: If true, the countdown timer will repeat as a periodic timer.
+  /// If false, the countdown timer will only run once ("one-shot" mode).
+  /// Returns the estimated actual duration (which may vary from the requested duration
+  /// dur to discrete RTC clock ticks).
+  pub fn setup_countdown_timer(&mut self, duration: &Duration,
+                               repeat: bool
+  )  -> Result<Duration, E> {
+    let (ticks, freq, estimated) =
+      Self::pct_ticks_and_rate_for_duration(duration);
+    self.pct_prep(ticks, freq, repeat)?;
+    Ok(estimated)
+  }
+
+  /// Set whether the Periodic Countdown Timer mode is repeating (periodic) or one-shot.
+  /// - `enable`: If true, starts the timer countdown. If false, stops the timer.
+  pub fn toggle_countdown_timer(&mut self, enable: bool)  -> Result<(), E> {
+    self.set_or_clear_reg_bits(REG_CONTROL1, TIMER_ENABLE_BIT, enable)
+  }
+
+  // /// Check whether the Periodic Countdown Timer has finished
+  // pub fn check_countdown_finished(&mut self) -> Result<bool, E> {
+  //   let reg_val = self.read_register(REG_STATUS)?;
+  //   let flag_set =  0 != (reg_val & PERIODIC_TIMER_FLAG); // Check if the TF flag is set
+  //   Ok(flag_set)
+  // }
+
+  /// Check whether countdown timer has finished counting down, and clear it
+  pub fn check_and_clear_countdown(&mut self) -> Result<bool, E> {
+    let flag_set = 0 != self.check_and_clear_bits(REG_STATUS, PERIODIC_TIMER_FLAG)?;
+    Ok(flag_set)
+  }
+
+  /// Read the current value of the Periodic Countdown Timer,
+  /// which is only valid after the timer has been enabled.
+  /// The meaning of the value depends on the configured TimerClockFreq
+  pub fn get_countdown_value(&mut self) -> Result<u16, E> {
+    let mut read_buf = [0u8;2];
+    self.read_multi_registers(REG_TIMER_STATUS0, &mut read_buf)?;
+    let value = ((read_buf[1] as u16) << 8) | (read_buf[0] as u16);
+    Ok(value)
+  }
+
+  // check and clear a flag
+  fn check_and_clear_bits(&mut self, reg: u8, bits: u8) -> Result<u8, E> {
+    self.select_mux_channel()?;
+    let reg_val = self.read_register_raw(reg)?;
+    let bits_val =  reg_val & bits;
+    if 0 != bits_val {
+      self.clear_reg_bits_raw(reg, bits)?;
+    }
+    Ok(bits_val)
+  }
+
 }
+
 
 pub trait EventTimeStampLogger {
   /// Error type
@@ -599,14 +821,15 @@ impl<I2C, E> DateTimeAccess for  RV3028<I2C>
   /// This assists with clock synchronization with external clocks.
   fn set_datetime(&mut self, datetime: &NaiveDateTime) -> Result<(), Self::Error> {
     let unix_timestamp: u32 = datetime.timestamp().try_into().unwrap();
+    self.select_mux_channel()?;
     // unix timestamp counter is stored in registers separate from everything else:
     // this method tries to align both, because the unix timestamp is not
     // used by eg the Event or Alarm interrupts
-    self.set_unix_time(unix_timestamp)?;
-    self.set_date(&datetime.date())?;
+    self.set_unix_time_raw(unix_timestamp)?;
+    self.set_date_raw(&datetime.date())?;
     // this must come last because writing to the seconds register resets
     // the upper stage of the prescaler
-    self.set_time(&datetime.time())?;
+    self.set_time_raw(&datetime.time())?;
     Ok(())
   }
 
@@ -616,7 +839,6 @@ impl<I2C, E> EventTimeStampLogger for  RV3028<I2C>
     I2C: Write<Error = E> + Read<Error = E> + WriteRead<Error = E>
 {
   type Error = E;
-
 
   fn toggle_event_log(&mut self, enable: bool) -> Result<(), Self::Error> {
     if enable {
@@ -694,6 +916,7 @@ mod tests {
   use std::vec;
 
 
+  type TestClass = RV3028<I2cMock>;
 
 
   #[test]
@@ -736,6 +959,176 @@ mod tests {
     let mock = I2cMock::new(&expectations);
     let mut rv3028 = RV3028::new(mock);
     assert_eq!(rv3028.get_unix_time().unwrap(), unix_time);
+  }
+
+  // The duration requested should exactly match the duration the RTC can deliver with
+  // pct_ticks_and_rate_for_duration
+  fn verify_whole_time_estimate(duration: &Duration, known_freq: TimerClockFreq, known_ticks: u16) {
+    let (ticks, freq, estimated) =
+      TestClass::pct_ticks_and_rate_for_duration(&duration);
+    assert_eq!(freq, known_freq);
+    assert_eq!(ticks, known_ticks);
+    assert_eq!(*duration, estimated);
+  }
+
+  // We know that the RTC can't precisely match the requested duration with
+  // pct_ticks_and_rate_for_duration, so just match ticks and freq
+  fn verify_ticks_and_freq(duration: &Duration, known_freq: TimerClockFreq, known_ticks: u16) {
+    let (ticks, freq, _estimated) =
+      TestClass::pct_ticks_and_rate_for_duration(&duration);
+    assert_eq!(freq, known_freq);
+    assert_eq!(ticks, known_ticks);
+    // assert_eq!(*duration, estimated); // TODO calculate
+  }
+
+  #[test]
+  fn test_countdown_timer_conversion_minutes() {
+    // should be fulfilled as minutes
+    let minutes_clock_freq = TimerClockFreq::HertzSixtieth;
+
+    // request a longer countdown than th RTC can fulfill
+    verify_ticks_and_freq(
+      &Duration::minutes(TestClass::MAX_PCT_COUNT + 32),
+      minutes_clock_freq, TestClass::MAX_PCT_TICKS);
+
+    verify_whole_time_estimate(
+      &Duration::minutes(TestClass::MAX_PCT_COUNT),
+      minutes_clock_freq, TestClass::MAX_PCT_TICKS);
+
+    // exceed the Seconds counter just slightly to invoke Minutes counter
+    const MAX_SECONDS_IN_MINUTES: i64 = (TestClass::MAX_PCT_COUNT/ 60) + 1;
+    verify_whole_time_estimate(
+      &Duration::minutes(MAX_SECONDS_IN_MINUTES),
+      minutes_clock_freq, MAX_SECONDS_IN_MINUTES as u16);
+
+    verify_whole_time_estimate(
+      &Duration::minutes(2047),
+      minutes_clock_freq, 2047);
+
+  }
+
+  #[test]
+  fn test_countdown_timer_conversion_seconds() {
+    // should be fulfilled as seconds
+    let seconds_clock_freq = TimerClockFreq::Hertz1;
+
+    // Maximum seconds ticks
+    verify_whole_time_estimate(
+      &Duration::seconds(TestClass::MAX_PCT_COUNT),
+      seconds_clock_freq, TestClass::MAX_PCT_TICKS);
+
+    verify_whole_time_estimate(
+      &Duration::seconds(2047),
+      seconds_clock_freq, 2047);
+
+    verify_whole_time_estimate(
+      &Duration::seconds(61),
+      seconds_clock_freq, 61);
+
+    // we serve whole minutes (under max seconds) with a seconds countdown
+    verify_whole_time_estimate(
+      &Duration::seconds(60),
+      seconds_clock_freq, 60);
+
+    verify_whole_time_estimate(
+      &Duration::minutes(1),
+      seconds_clock_freq, 60);
+
+    verify_whole_time_estimate(
+      &Duration::minutes(45),
+      seconds_clock_freq, 45*60);
+
+    // minimum Seconds ticks
+    verify_whole_time_estimate(
+      &Duration::seconds(1),
+      seconds_clock_freq, 1);
+
+  }
+
+  #[test]
+  fn test_countdown_timer_conversion_micros() {
+    // should be fulfilled as microseconds
+    let micros_clock_freq = TimerClockFreq::Hertz4096;
+
+    verify_whole_time_estimate(
+      &Duration::microseconds(TestClass::MAX_PCT_MICROS),
+      micros_clock_freq, TestClass::MAX_PCT_TICKS);
+
+    verify_ticks_and_freq(
+      &Duration::microseconds(2048),
+      micros_clock_freq, (2048 / TestClass::PCT_MICROS_PERIOD) as u16);
+
+    verify_ticks_and_freq(
+      &Duration::microseconds(655),
+      micros_clock_freq, (655 / TestClass::PCT_MICROS_PERIOD) as u16);
+
+    verify_ticks_and_freq(
+      &Duration::microseconds(1024),
+      micros_clock_freq, (1024 / TestClass::PCT_MICROS_PERIOD) as u16);
+
+    // some exact micros values
+
+    verify_whole_time_estimate(
+      &Duration::microseconds(999*TestClass::PCT_MICROS_PERIOD),
+      micros_clock_freq, 999);
+
+    verify_whole_time_estimate(
+      &Duration::microseconds(100*TestClass::PCT_MICROS_PERIOD),
+      micros_clock_freq, 100);
+
+    verify_whole_time_estimate(
+      &Duration::microseconds(17*TestClass::PCT_MICROS_PERIOD),
+      micros_clock_freq, 17);
+
+    // minimum microseconds tick
+    verify_whole_time_estimate(
+      &Duration::microseconds(TestClass::PCT_MICROS_PERIOD),
+      micros_clock_freq, 1);
+
+  }
+
+  #[test]
+  fn test_countdown_timer_conversion_millis() {
+    // should be fulfilled as milliseconds
+    let millis_clock_freq = TimerClockFreq::Hertz64;
+
+    // a bit more than max micros counter, but less than max millis counter
+    verify_ticks_and_freq(
+      &Duration::microseconds(TestClass::MAX_PCT_MICROS + 1),
+      millis_clock_freq,
+      ((TestClass::MAX_PCT_MICROS + 1) / (TestClass::PCT_MILLIS_PERIOD * 1_000)) as u16
+    );
+
+    // maximum millis counter
+    verify_whole_time_estimate(
+      &Duration::milliseconds(TestClass::MAX_PCT_MILLIS),
+      millis_clock_freq, TestClass::MAX_PCT_TICKS);
+
+    // mid-value millis
+    verify_ticks_and_freq(
+      &Duration::milliseconds(2047),
+      millis_clock_freq, (2047 / TestClass::PCT_MILLIS_PERIOD) as u16);
+
+    // exactly on the seconds clock
+    verify_whole_time_estimate(
+      &Duration::milliseconds(1000*TestClass::PCT_MILLIS_PERIOD),
+      TimerClockFreq::Hertz1, TestClass::PCT_MILLIS_PERIOD as u16 );
+
+    // exactly on the millis period
+
+    verify_whole_time_estimate(
+      &Duration::milliseconds(999*TestClass::PCT_MILLIS_PERIOD),
+      millis_clock_freq, 999);
+
+    verify_whole_time_estimate(
+      &Duration::milliseconds(100*TestClass::PCT_MILLIS_PERIOD),
+      millis_clock_freq, 100);
+
+    // minimum millis ticks
+    verify_whole_time_estimate(
+      &Duration::milliseconds(TestClass::PCT_MILLIS_PERIOD),
+      millis_clock_freq, 1);
+
   }
 
 

@@ -1,6 +1,6 @@
 [package]
 name = "rv3028c7-rtc"
-version = "0.4.1"
+version = "0.5.0"
 edition = "2021"
 authors = ["Todd Stellanova <tstellanova@users.noreply.github.com>"]
 license = "BSD-3-Clause"
@@ -23,6 +23,7 @@ chrono = {version = "0.4.31", default-features = false, features = ["alloc","clo
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 linux-embedded-hal = "0.3.0"
-
+gpiocdev = "0.6.1"
+spin_sleep = "1.1.1"
 
 
