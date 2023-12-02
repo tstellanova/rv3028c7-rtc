@@ -898,7 +898,7 @@ mod tests {
   }
 
   // We know that the RTC can't precisely match the requested duration with
-  // pct_ticks_and_rate_for_duration, so just match ticks
+  // pct_ticks_and_rate_for_duration, so just match ticks and freq
   fn verify_ticks_and_freq(duration: &Duration, known_freq: TimerClockFreq, known_ticks: u16) {
     let (ticks, freq, _estimated) =
       TestClass::pct_ticks_and_rate_for_duration(&duration);

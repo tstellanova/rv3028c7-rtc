@@ -19,21 +19,18 @@ fn test_one_shot_duration<I2C,E>(rtc: &mut RV3028<I2C>, duration: &Duration) -> 
   rtc.toggle_countdown_timer(false)?;
   rtc.check_and_clear_countdown()?;
   let estimated_duration = rtc.setup_countdown_timer(duration, false)?;
+  // account for supposed maximum uncertainty in RTC durations
   let expected_sleep =
-    if estimated_duration.le(&Duration::microseconds(976)) {
-      estimated_duration.add(Duration::microseconds(245))
-    } else if estimated_duration.le(&Duration::milliseconds(990)) {
-      estimated_duration.add(Duration::milliseconds(48))
+    if estimated_duration.le(&Duration::microseconds(4096 * 245)){
+      estimated_duration.add(Duration::microseconds(245) )
     }
     else {
-      estimated_duration.add(Duration::milliseconds(16))
+      estimated_duration.add(Duration::milliseconds(16) )
     };
 
-
+  println!("> oneshot {} sleep {} ", duration, expected_sleep);
 
   let start_time = Utc::now().naive_utc();
-
-  println!("> oneshot {} sleep {} ", duration, expected_sleep);
   rtc.toggle_countdown_timer(true)?;
   if estimated_duration.lt(&Duration::seconds(1)) {
     std::thread::sleep(expected_sleep.to_std().unwrap());
@@ -52,7 +49,7 @@ fn test_one_shot_duration<I2C,E>(rtc: &mut RV3028<I2C>, duration: &Duration) -> 
       break delta;
     }
     else {
-      println!("remain: {}", remain);
+      // println!("remain: {}", remain);
       // 15.625 ms uncertainty
       std::thread::sleep(Duration::milliseconds(1).to_std().unwrap());
     }
@@ -74,17 +71,16 @@ fn test_periodic_duration<I2C,E>(rtc: &mut RV3028<I2C>, duration: &Duration) -> 
 
   let estimated_duration = rtc.setup_countdown_timer(duration, true)?;
   // we don't adjust for the first duration uncertainty, assuming it will average out
-  let expected_sleep =    estimated_duration.add(Duration::milliseconds(16)) ;
+  let expected_sleep =    estimated_duration;
   println!("> periodic {} sleep {} ", duration, expected_sleep);
 
   // place to store the sum of all measured countdown durations
   let mut sum_actual = Duration::zero();
-  const NUM_ITERATIONS: usize = 5;
-  
-  // start the countdown repeating
-  rtc.toggle_countdown_timer(true)?;
+  const NUM_ITERATIONS: usize = 10;
 
+  // start the countdown repeating
   let mut start_time = Utc::now().naive_utc();
+  rtc.toggle_countdown_timer(true)?;
   for _i in 0..NUM_ITERATIONS {
     if estimated_duration.lt(&Duration::seconds(1)) {
       std::thread::sleep(expected_sleep.to_std().unwrap());
@@ -130,19 +126,24 @@ fn main() {
   println!("sys {}\r\nrtc {}\r\n", dt_sys, dt_rtc);
 
 
-  // Note that all RTC durations come with a minimum uncertainty in the
-  // first period duration.
-  // This is between 244 microseconds and 15 milliseconds
+  // Note that all RTC durations have a minimum uncertainty in the
+  // first period duration: this is between 244 microseconds and 15 milliseconds.
+  // Add to that some variation in how the host (linux) platform
+  // polls for RTC countdown timer completion.
 
   println!("\r\n==== ONE SHOTS ====");
   test_one_shot_duration(&mut rtc, &Duration::microseconds(488)).unwrap();
   test_one_shot_duration(&mut rtc, &Duration::milliseconds(15 * (1000/15))).unwrap();
+  test_one_shot_duration(&mut rtc, &Duration::seconds(1)).unwrap();
+  test_one_shot_duration(&mut rtc, &Duration::seconds(2)).unwrap();
   test_one_shot_duration(&mut rtc, &Duration::seconds(3)).unwrap();
   // test_one_shot_duration(&mut rtc, &Duration::minutes(1)).unwrap();
 
   println!("\r\n==== PERIODICS ====");
   test_periodic_duration(&mut rtc, &Duration::microseconds(488)).unwrap();
   test_periodic_duration(&mut rtc, &Duration::milliseconds(15 * (1000/15))).unwrap();
+  test_one_shot_duration(&mut rtc, &Duration::seconds(1)).unwrap();
+  test_one_shot_duration(&mut rtc, &Duration::seconds(2)).unwrap();
   test_periodic_duration(&mut rtc, &Duration::seconds(3)).unwrap();
   // test_periodic_duration(&mut rtc, &Duration::minutes(1)).unwrap();
 
