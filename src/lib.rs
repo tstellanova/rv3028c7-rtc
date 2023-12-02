@@ -162,7 +162,7 @@ const EVENT_INT_ENABLE_BIT: u8 = 1 << 2;// EIE / Event Interrupt Enable bit
 const CLOCK_OUT_ENABLE_BIT:u8 = 1<< 7; // CLKOE / CLKOUT Enable bit
 const BACKUP_SWITCH_INT_ENABLE_BIT:u8 = 1 << 6; // BCIE / Backup Switchover Interrupt Enable bit bit
 const TRICKLE_CHARGE_ENABLE_BIT: u8 = 1 << 5; // TCE bit
-
+const BACKUP_SWITCHOVER_BITS:  u8  = 0b11 << 2; // Backup Switchover Mode / BSM bits
 
 const TRICKLE_CHARGE_RESISTANCE_BITS: u8 = 0b11; // TCR bits
 #[derive(Clone, Copy)]
@@ -349,6 +349,14 @@ impl<I2C, E> RV3028<I2C>
     Ok(conf_val)
   }
 
+  /// - `enable` enables switching to Vbackup, disables if false
+  pub fn toggle_backup_switchover(&mut self, enable: bool) -> Result<bool, E> {
+    self.select_mux_channel()?;
+    self.set_or_clear_reg_bits_raw( EEPROM_MIRROR_ADDRESS, BACKUP_SWITCHOVER_BITS, enable)?;
+    let conf_val =
+      0 != self.read_register_raw(EEPROM_MIRROR_ADDRESS)? & BACKUP_SWITCHOVER_BITS;
+    Ok(conf_val)
+  }
 
   /// Get the current value of the EEPROM mirror from RAM
   pub fn get_eeprom_mirror_value(&mut self) -> Result<u8, E> {
