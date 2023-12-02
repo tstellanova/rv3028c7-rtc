@@ -17,6 +17,9 @@ use rtcc::DateTimeAccess;
 ///  and connecting the SDA, SCL, GND, and 3.3V pins from RPi to the RTC
 
 
+// const MUX_I2C_ADDRESS: u8 = 0x70;
+// const MUX_CHAN_FIRST:u8 = 0b0000_0001 ; //channel 0, LSB
+// const MUX_CHAN_SECOND:u8 = 0b1000_0000 ; // channel 7, MSB
 
 fn main() {
     // Initialize the I2C bus (device)
@@ -24,6 +27,7 @@ fn main() {
 
     // Create instance of the RV3028 driver
     let mut rtc1 = RV3028::new(i2c_bus);
+    // let mut rtc1 = RV3028::new_with_mux(i2c_bus, MUX_I2C_ADDRESS, MUX_CHAN_SECOND);
 
     let dt1 = rtc1.datetime().unwrap();
     let sys_dt = Utc::now().naive_utc();
@@ -34,6 +38,7 @@ fn main() {
         true, TrickleChargeCurrentLimiter::Ohms15k).unwrap();
     println!("rtc1 trickle enabled: {}",one_enabled);
 
+    // enable switchover to backup power (Vbackup)
     let bsm_enabled = rtc1.toggle_backup_switchover(true).unwrap();
     println!("rtc1 backup switchover enabled : {}",bsm_enabled);
 

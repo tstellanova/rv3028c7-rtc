@@ -163,6 +163,7 @@ const CLOCK_OUT_ENABLE_BIT:u8 = 1<< 7; // CLKOE / CLKOUT Enable bit
 const BACKUP_SWITCH_INT_ENABLE_BIT:u8 = 1 << 6; // BCIE / Backup Switchover Interrupt Enable bit bit
 const TRICKLE_CHARGE_ENABLE_BIT: u8 = 1 << 5; // TCE bit
 const BACKUP_SWITCHOVER_BITS:  u8  = 0b11 << 2; // Backup Switchover Mode / BSM bits
+const BACKUP_SWITCHOVER_DSM:  u8  = 0b01 << 2; // Backup Switchover Mode / BSM bits as DSM
 
 const TRICKLE_CHARGE_RESISTANCE_BITS: u8 = 0b11; // TCR bits
 #[derive(Clone, Copy)]
@@ -349,12 +350,15 @@ impl<I2C, E> RV3028<I2C>
     Ok(conf_val)
   }
 
+  /// Toggle whether the Vbackup power source should be used
+  /// when Vdd supply level drops below useful level.
   /// - `enable` enables switching to Vbackup, disables if false
+  /// Returns the set value
   pub fn toggle_backup_switchover(&mut self, enable: bool) -> Result<bool, E> {
     self.select_mux_channel()?;
-    self.set_or_clear_reg_bits_raw( EEPROM_MIRROR_ADDRESS, BACKUP_SWITCHOVER_BITS, enable)?;
+    self.set_or_clear_reg_bits_raw( EEPROM_MIRROR_ADDRESS, BACKUP_SWITCHOVER_DSM, enable)?;
     let conf_val =
-      0 != self.read_register_raw(EEPROM_MIRROR_ADDRESS)? & BACKUP_SWITCHOVER_BITS;
+      0 != self.read_register_raw(EEPROM_MIRROR_ADDRESS)? & BACKUP_SWITCHOVER_DSM;
     Ok(conf_val)
   }
 
