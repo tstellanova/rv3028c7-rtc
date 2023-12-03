@@ -162,7 +162,7 @@ const EVENT_INT_ENABLE_BIT: u8 = 1 << 2;// EIE / Event Interrupt Enable bit
 const CLOCK_OUT_ENABLE_BIT:u8 = 1<< 7; // CLKOE / CLKOUT Enable bit
 const BACKUP_SWITCH_INT_ENABLE_BIT:u8 = 1 << 6; // BCIE / Backup Switchover Interrupt Enable bit bit
 const TRICKLE_CHARGE_ENABLE_BIT: u8 = 1 << 5; // TCE bit
-const BACKUP_SWITCHOVER_BITS:  u8  = 0b11 << 2; // Backup Switchover Mode / BSM bits
+// const BACKUP_SWITCHOVER_LSM:  u8  = 0b11 << 2; // Backup Switchover Mode / BSM bits as LSM
 const BACKUP_SWITCHOVER_DSM:  u8  = 0b01 << 2; // Backup Switchover Mode / BSM bits as DSM
 
 const TRICKLE_CHARGE_RESISTANCE_BITS: u8 = 0b11; // TCR bits
@@ -295,14 +295,14 @@ impl<I2C, E> RV3028<I2C>
   //   res
   // }
 
-  // set specific bits in a register:
-  // all bits must be high that you wish to set
-  fn set_reg_bits(&mut self, reg: u8, bits: u8) -> Result<(), E> {
-    self.select_mux_channel()?;
-    self.set_reg_bits_raw(reg, bits)
-  }
+  // // set specific bits in a register:
+  // // all bits must be high that you wish to set
+  // fn set_reg_bits(&mut self, reg: u8, bits: u8) -> Result<(), E> {
+  //   self.select_mux_channel()?;
+  //   self.set_reg_bits_raw(reg, bits)
+  // }
 
-  // set specific bits in a register: skips the mux
+  // Set specific bits in a register: "raw" means it skips the mux
   // all bits must be high that you wish to set
   fn set_reg_bits_raw(&mut self, reg: u8, bits: u8) -> Result<(), E> {
     let mut reg_val = self.read_register_raw(reg)?;
@@ -506,11 +506,6 @@ impl<I2C, E> RV3028<I2C>
   pub fn check_and_clear_alarm(&mut self) -> Result<bool, E> {
     // Check if the AF flag is set
     let alarm_flag_set = 0 != self.check_and_clear_bits(REG_STATUS, ALARM_FLAG_BIT)?;
-    // let reg_val = self.read_register(REG_STATUS)?;
-    // let alarm_flag_set =  0 != (reg_val & ALARM_FLAG_BIT); // Check if the AF flag is set
-    // if alarm_flag_set {
-    //   self.clear_reg_bits(REG_STATUS, ALARM_FLAG_BIT)?;
-    // }
     Ok(alarm_flag_set)
   }
 
@@ -841,6 +836,7 @@ impl<I2C, E> EventTimeStampLogger for  RV3028<I2C>
   type Error = E;
 
   fn toggle_event_log(&mut self, enable: bool) -> Result<(), Self::Error> {
+    self.select_mux_channel()?;
     if enable {
       // App notes recommend first disabling the event log with TSE and setting TSR
       // 1. Initialize bits TSE and EIE to 0.
@@ -852,20 +848,20 @@ impl<I2C, E> EventTimeStampLogger for  RV3028<I2C>
       // 5. Set the TSE bit to 1 to enable the Time Stamp function.
 
       // Initialize bits TSE and EIE to 0.
-      self.clear_reg_bits(REG_CONTROL2, TIME_STAMP_ENABLE_BIT)?;
+      self.clear_reg_bits_raw(REG_CONTROL2, TIME_STAMP_ENABLE_BIT)?;
       // Assume that TSOW has already been selected
       // Clear the single event detect flag EVF and BSF
-      self.clear_reg_bits(REG_STATUS, EVENT_FLAG_BIT)?;
-      self.clear_reg_bits(REG_STATUS, BACKUP_SWITCH_FLAG)?;
+      self.clear_reg_bits_raw(REG_STATUS, EVENT_FLAG_BIT)?;
+      self.clear_reg_bits_raw(REG_STATUS, BACKUP_SWITCH_FLAG)?;
       // Reset all Time Stamp registers to zero
-      self.set_reg_bits(REG_EVENT_CONTROL, TIME_STAMP_RESET_BIT)?;
+      self.set_reg_bits_raw(REG_EVENT_CONTROL, TIME_STAMP_RESET_BIT)?;
 
       // start listening for events
-      self.set_reg_bits(REG_CONTROL2, TIME_STAMP_ENABLE_BIT)
+      self.set_reg_bits_raw(REG_CONTROL2, TIME_STAMP_ENABLE_BIT)
     }
     else {
       // stop listening for events
-      self.clear_reg_bits(REG_CONTROL2, TIME_STAMP_ENABLE_BIT)
+      self.clear_reg_bits_raw(REG_CONTROL2, TIME_STAMP_ENABLE_BIT)
     }
   }
 
