@@ -48,8 +48,11 @@ fn main() {
     let init_dt = rtc.datetime().unwrap();
     println!("sys: {}\r\nrtc: {}", sys_dt, init_dt);
 
+    // rtc.configure_event_logging(
+    //     TS_EVENT_SOURCE_EVI, true, true, false, true).unwrap();
+
     rtc.configure_event_logging(
-        TS_EVENT_SOURCE_EVI, true, true, false, true).unwrap();
+        TS_EVENT_SOURCE_EVI, false, true, false, true).unwrap();
     let (event_count, odt) =
       rtc.get_event_count_and_datetime().unwrap();
     if 0 != event_count {

@@ -143,20 +143,35 @@ const EEPROM_MIRROR_ADDRESS: u8 = 0x37;// RAM mirror of EEPROM config values
 
 
 // REG_EVENT_CONTROL Event Control register bits:   EHL, ET, TSR, TSOW, TSS
-const EVENT_HIGH_LOW_BIT: u8 = 1 << 6; // EHL bit
-const TIME_STAMP_RESET_BIT: u8 = 1 << 2; // TSR bit
-const TIME_STAMP_OVERWRITE_BIT: u8 = 1 << 1; // TSOW bit
-const TIME_STAMP_SOURCE_BIT: u8 = 1 << 0; // TSS bit
+#[repr(u8)]
+enum RegEventControlBits {
+  // EHL bit
+  EventHighLowBit = 1 << 6,
+  // TSR bit
+  TimeStampResetBit = 1 << 2,
+  // TSOW bit
+  TimeStampOverwriteBit = 1 << 1,
+  // TSS / Time Stamp Source bit
+  TimeStampSourceBit = 1 << 0,
+}
 
 pub const TS_EVENT_SOURCE_EVI: u8 = 0; /// Event log source is external interrupt EVI (default)
 pub const TS_EVENT_SOURCE_BSF: u8 = 1; /// Event log source is backup power switchover
 
 // REG_CONTROL2 "Control 2" register bits: TSE CLKIE UIE TIE AIE EIE 12_24 RESET
-const TIME_STAMP_ENABLE_BIT: u8 = 1 << 7; // TSE / Time Stamp Enable bit
-const TIME_UPDATE_INT_ENABLE_BIT: u8 = 1 << 5; // UIE / Time Update Interrupt Enable
-const TIMER_INT_ENABLE_BIT: u8 = 1 << 4;// TIE Countdown Timer Interrupt Enable bit
-const ALARM_INT_ENABLE_BIT: u8 = 1 << 3;// AIE / Alarm Interrupt Enable bit
-const EVENT_INT_ENABLE_BIT: u8 = 1 << 2;// EIE / Event Interrupt Enable bit
+#[repr(u8)]
+enum RegControl2Bits {
+  // TSE / Time Stamp Enable bit
+  TimeStampEnableBit = 1 << 7,
+  // UIE / Time Update Interrupt Enable
+  TimeUpdateIntEnableBit = 1 << 5,
+  // TIE Countdown Timer Interrupt Enable bit
+  TimerIntEnableBit = 1 << 4,
+  // AIE / Alarm Interrupt Enable bit
+  AlarmIntEnableBit = 1 << 3,
+  // EIE / Event Interrupt Enable bit
+  EventIntEnableBit = 1 << 2,
+}
 
 // EEPROM_MIRROR_ADDRESS / EEPROM mirror register bits:
 const CLOCK_OUT_ENABLE_BIT:u8 = 1<< 7; // CLKOE / CLKOUT Enable bit
@@ -494,18 +509,18 @@ impl<I2C, E> RV3028<I2C>
 
   /// Toggle whether EVI events trigger on high/rising or low/falling edges
   pub fn toggle_event_high_low(&mut self, high: bool) -> Result<(), E> {
-    self.set_or_clear_reg_bits(REG_EVENT_CONTROL, EVENT_HIGH_LOW_BIT, high)
+    self.set_or_clear_reg_bits(REG_EVENT_CONTROL, RegEventControlBits::EventHighLowBit as u8, high)
   }
 
   /// Enable INT pin output when alarm occurs
   pub fn toggle_alarm_int_enable(&mut self, enable: bool) -> Result<(), E> {
-    self.set_or_clear_reg_bits(REG_CONTROL2, ALARM_INT_ENABLE_BIT, enable)
+    self.set_or_clear_reg_bits(REG_CONTROL2, RegControl2Bits::AlarmIntEnableBit as u8, enable)
   }
 
   /// Toggle whether the RTC outputs a pulse (active low) on INT pin,
   /// when the countdown timer expires.
   pub fn toggle_countdown_int_enable(&mut self, enable: bool) -> Result<(), E> {
-    self.set_or_clear_reg_bits(REG_CONTROL2, TIMER_INT_ENABLE_BIT, enable)
+    self.set_or_clear_reg_bits(REG_CONTROL2, RegControl2Bits::TimerIntEnableBit as u8, enable)
   }
 
   /// Toggle whether interrupt signal is generated on the INT pin:
@@ -514,13 +529,13 @@ impl<I2C, E> RV3028<I2C>
   /// The signal on the INT pin is retained until the EVF flag is cleared
   /// to 0 (no automatic cancellation)
   pub fn toggle_event_int_enable(&mut self, enable: bool) -> Result<(), E> {
-    self.set_or_clear_reg_bits(REG_CONTROL2, EVENT_INT_ENABLE_BIT, enable)
+    self.set_or_clear_reg_bits(REG_CONTROL2, RegControl2Bits::EventIntEnableBit as u8, enable)
   }
 
   /// Toggles whether an interrupt signal is generated on the INT pin:
   /// - when the time updates at either 1 second or 1 minute intervals
   pub fn toggle_time_up_int_enable(&mut self, enable: bool) -> Result<(), E> {
-    self.set_or_clear_reg_bits(REG_CONTROL2, TIME_UPDATE_INT_ENABLE_BIT, enable)
+    self.set_or_clear_reg_bits(REG_CONTROL2, RegControl2Bits::TimeUpdateIntEnableBit as u8, enable)
   }
 
 
@@ -528,8 +543,10 @@ impl<I2C, E> RV3028<I2C>
   pub fn clear_all_int_out_bits(&mut self) -> Result<(), E> {
     // UIE, TIE, AIE,  EIE
     self.clear_reg_bits(REG_CONTROL2,
-                        TIME_UPDATE_INT_ENABLE_BIT | TIMER_INT_ENABLE_BIT |
-                          ALARM_INT_ENABLE_BIT | EVENT_INT_ENABLE_BIT )?;
+                        RegControl2Bits::TimeUpdateIntEnableBit as u8 |
+                          RegControl2Bits::TimerIntEnableBit as u8 |
+                          RegControl2Bits::AlarmIntEnableBit as u8 |
+                          RegControl2Bits::EventIntEnableBit as u8  )?;
     // BSIE
     self.clear_reg_bits(EEPROM_MIRROR_ADDRESS, BACKUP_SWITCH_INT_ENABLE_BIT)?;
 
@@ -550,13 +567,13 @@ impl<I2C, E> RV3028<I2C>
     // 5. The first interrupt will occur after the next event, either second or minute change.
 
     // UIE clear
-    self.clear_reg_bits_raw(REG_CONTROL2, TIME_UPDATE_INT_ENABLE_BIT)?;
+    self.clear_reg_bits_raw(REG_CONTROL2, RegControl2Bits::TimeUpdateIntEnableBit as u8)?;
     // UF clear
     self.clear_reg_bits_raw(REG_STATUS, TIME_UPDATE_FLAG)?;
     // USEL set/clear
     self.set_or_clear_reg_bits_raw(REG_CONTROL1, USEL_BIT, minutes)?;
     // UIE re-set
-    self.set_or_clear_reg_bits_raw(REG_CONTROL2, TIME_UPDATE_INT_ENABLE_BIT, int_enable)?;
+    self.set_or_clear_reg_bits_raw(REG_CONTROL2, RegControl2Bits::TimeUpdateIntEnableBit as u8, int_enable)?;
 
     Ok(())
   }
@@ -583,7 +600,7 @@ impl<I2C, E> RV3028<I2C>
                    weekday: Option<Weekday>, match_day: bool, match_hour: bool, match_minute: bool) -> Result<(), E> {
 
     self.select_mux_channel()?;
-    // Initialize AF to 0; AIE/ALARM_INT_ENABLE_BIT is managed independently
+    // Initialize AF to 0; AIE/AlarmIntEnableBit is managed independently
     self.clear_reg_bits_raw(REG_STATUS, ALARM_FLAG_BIT)?;
 
     // Procedure suggested by App Notes:
@@ -892,7 +909,7 @@ impl<I2C, E> EventTimeStampLogger for  RV3028<I2C>
 
   fn toggle_event_log(&mut self, enable: bool) -> Result<(), Self::Error> {
     self.select_mux_channel()?;
-    self.set_or_clear_reg_bits_raw(REG_CONTROL2, TIME_STAMP_ENABLE_BIT, enable)
+    self.set_or_clear_reg_bits_raw(REG_CONTROL2, RegControl2Bits::TimeStampEnableBit as u8, enable)
   }
 
   fn configure_event_logging(
@@ -901,24 +918,32 @@ impl<I2C, E> EventTimeStampLogger for  RV3028<I2C>
 
     // Pause listening for events
     // 1. Initialize bits TSE and EIE to 0.
-    self.clear_reg_bits_raw(REG_CONTROL2, TIME_STAMP_ENABLE_BIT & EVENT_INT_ENABLE_BIT)?;
+    self.clear_reg_bits_raw(REG_CONTROL2,
+                            RegControl2Bits::TimeStampEnableBit as u8 &
+                              RegControl2Bits::EventIntEnableBit  as u8)?;
     // Set EHL bit to 1 or 0 to choose high or low level (or rising or falling edge) detection on pin EVI.
-    self.set_or_clear_reg_bits_raw(REG_EVENT_CONTROL, EVENT_HIGH_LOW_BIT, rising)?;
+    self.set_or_clear_reg_bits_raw(
+      REG_EVENT_CONTROL, RegEventControlBits::EventHighLowBit as u8, rising)?;
     // 2. Select TSOW (0 or 1), clear EVF and BSF.
-    self.set_or_clear_reg_bits_raw(REG_EVENT_CONTROL, TIME_STAMP_OVERWRITE_BIT, tsow)?;
+    self.set_or_clear_reg_bits_raw(
+      REG_EVENT_CONTROL, RegEventControlBits::TimeStampOverwriteBit as u8, tsow)?;
     self.clear_reg_bits_raw(REG_STATUS, EVENT_FLAG_BIT & BACKUP_SWITCH_FLAG)?;
 
     // 3. Reset all Time Stamp registers to zero
-    self.set_reg_bits_raw(REG_EVENT_CONTROL, TIME_STAMP_RESET_BIT)?;
+    self.set_reg_bits_raw(
+      REG_EVENT_CONTROL, RegEventControlBits::TimeStampResetBit as u8)?;
     // 4. Select the External Event Interrupt function (TSS = 0) or the Automatic Backup Switchover Interrupt
     // function (TSS = 1) as time stamp source and initialize the appropriate function
     let enable_bsf = evt_source == TS_EVENT_SOURCE_BSF;
-    self.set_or_clear_reg_bits_raw(REG_EVENT_CONTROL, TIME_STAMP_SOURCE_BIT, enable_bsf)?;
+    self.set_or_clear_reg_bits_raw(
+      REG_EVENT_CONTROL, RegEventControlBits::TimeStampSourceBit as u8, enable_bsf)?;
     // 5. Set the TSE bit to 1 to enable the Time Stamp function.
     // see also: toggle_event_log
-    self.set_or_clear_reg_bits_raw(REG_CONTROL2, TIME_STAMP_ENABLE_BIT, start)?;
+    self.set_or_clear_reg_bits_raw(
+      REG_CONTROL2, RegControl2Bits::TimeStampEnableBit as u8, start)?;
     // 10. Set EIE bit to 1 if you want to get a hardware interrupt on INT
-    self.set_or_clear_reg_bits(REG_CONTROL2, EVENT_INT_ENABLE_BIT, int_enable)?;
+    self.set_or_clear_reg_bits(
+      REG_CONTROL2, RegControl2Bits::EventIntEnableBit as u8, int_enable)?;
 
 
     // 1. Initialize bits TSE and EIE to 0.
@@ -966,12 +991,14 @@ impl<I2C, E> EventTimeStampLogger for  RV3028<I2C>
   }
 
   fn toggle_time_stamp_overwrite(&mut self, enable: bool) -> Result<(), Self::Error> {
-    self.set_or_clear_reg_bits(REG_EVENT_CONTROL, TIME_STAMP_OVERWRITE_BIT, enable)
+    self.set_or_clear_reg_bits(
+      REG_EVENT_CONTROL, RegEventControlBits::TimeStampOverwriteBit as u8, enable)
   }
 
   fn set_event_source(&mut self, source: u8) -> Result<(), Self::Error> {
     let enable = TS_EVENT_SOURCE_BSF == source;
-    self.set_or_clear_reg_bits(REG_EVENT_CONTROL, TIME_STAMP_SOURCE_BIT, enable)
+    self.set_or_clear_reg_bits(
+      REG_EVENT_CONTROL, RegEventControlBits::TimeStampSourceBit as u8, enable)
   }
 
 }
