@@ -112,7 +112,7 @@ const REG_UNIX_TIME_0: u8 = 0x1B;
 // REG_CONTROL1 "Control 1" register bits:
 const TIMER_REPEAT_BIT: u8 = 1 << 7;// TRPT / Timer Repeat bit. Single or Repeat countdown timer
 const WADA_BIT: u8 = 1 << 5; // WADA / Weekday Alarm / Date Alarm selection bit
-// const USEL_BIT: u8 = 1 << 4;
+const USEL_BIT: u8 = 1 << 4; //  USEL / Update Interrupt Select bit. Seconds or minutes.
 // const EERD_BIT: u8 = 1 << 3;
 const TIMER_ENABLE_BIT: u8 = 1 << 2; // TE / Periodic Countdown Timer Enable bit.
 const TIMER_CLOCK_FREQ_BITS: u8 = 0b11; // TD / Timer Clock Frequency selection bits
@@ -129,12 +129,12 @@ enum TimerClockFreq {
 // REG_STATUS Status register bits:
 // const EEBUSY_BIT: u8 = 1 << 7;
 const CLOCK_INT_FLAG_BIT: u8 = 1 << 6; // CLKF  / Clock Output Interrupt Flag
-const BACKUP_SWITCH_FLAG: u8 = 1 << 4; // BSF bit
+const BACKUP_SWITCH_FLAG: u8 = 1 << 5; // BSF bit
+const TIME_UPDATE_FLAG: u8 = 1 << 4; // UF / Periodic Time Update Flag
 const PERIODIC_TIMER_FLAG: u8 = 1 << 3; // TF bit / Periodic Countdown Timer Flag
 const ALARM_FLAG_BIT : u8 = 1 << 2; // AF / Alarm Flag
 const EVENT_FLAG_BIT: u8 = 1 << 1; // EVF / Event Flag (external event interrupt)
-
-
+const POWER_ON_RESET_FLAG_BIT: u8 = 1 << 0; // PORF / Power On Reset Flag
 
 // EEPROM register addresses and commands
 const EEPROM_MIRROR_ADDRESS: u8 = 0x37;// RAM mirror of EEPROM config values
@@ -254,8 +254,18 @@ impl<I2C, E> RV3028<I2C>
     Ok(buf[0])
   }
 
-  //clear_register
 
+  /// Check whether the Power On Reset flag is set.
+  /// If this flag is cleared (set to zero) beforehand,
+  /// indicates a voltage drop below VPOR.
+  /// If this flag is set, the data in the device RAM registers are no longer valid
+  /// and all registers must be (re)initialized.
+  /// The flag value 1 is retained until a 0 is written by the user.
+  /// At power up (POR) the value is set to 1, the user has to write 0 to the flag to use it.
+  pub fn check_and_clear_power_on_reset(&mut self) -> Result<bool, E>  {
+    let flag_set = 0 != self.check_and_clear_bits(REG_STATUS, POWER_ON_RESET_FLAG_BIT)?;
+    Ok(flag_set)
+  }
 
   // TODO these methods have not been thoroughly tested, and are believed broken.
   // fn is_eeprom_busy(&mut self) -> Result<bool, E> {
@@ -507,6 +517,13 @@ impl<I2C, E> RV3028<I2C>
     self.set_or_clear_reg_bits(REG_CONTROL2, EVENT_INT_ENABLE_BIT, enable)
   }
 
+  /// Toggles whether an interrupt signal is generated on the INT pin:
+  /// - when the time updates at either 1 second or 1 minute intervals
+  pub fn toggle_time_up_int_enable(&mut self, enable: bool) -> Result<(), E> {
+    self.set_or_clear_reg_bits(REG_CONTROL2, TIME_UPDATE_INT_ENABLE_BIT, enable)
+  }
+
+
   /// Disable all INT pin output selector bits in RAM, excludes PORIE
   pub fn clear_all_int_out_bits(&mut self) -> Result<(), E> {
     // UIE, TIE, AIE,  EIE
@@ -519,6 +536,33 @@ impl<I2C, E> RV3028<I2C>
     // PORIE -- must be set in EEPROM -- don't bother to set?
     Ok(())
   }
+
+  /// - `int_enable` enables INT output on the periodic time updates
+  pub fn configure_periodic_time_update(&mut self, minutes: bool, int_enable: bool) -> Result<(), E> {
+    self.select_mux_channel()?;
+
+    // 1. Initialize bits UIE and UF to 0.
+    // 2. Choose the timer source clock and write the corresponding value in the USEL bit.
+    // 3. Set the UIE bit to 1 if you want to get a hardware interrupt on INT̅ ̅ ̅ ̅ ̅
+    // pin.
+    // 4. Set CUIE bit to 1 to enable clock output when a time update interrupt occurs. See also CLOCK OUTPUT
+    // SCHEME.
+    // 5. The first interrupt will occur after the next event, either second or minute change.
+
+    // UIE clear
+    self.clear_reg_bits_raw(REG_CONTROL2, TIME_UPDATE_INT_ENABLE_BIT)?;
+    // UF clear
+    self.clear_reg_bits_raw(REG_STATUS, TIME_UPDATE_FLAG)?;
+    // USEL set/clear
+    self.set_or_clear_reg_bits_raw(REG_CONTROL1, USEL_BIT, minutes)?;
+    // UIE re-set
+    self.set_or_clear_reg_bits_raw(REG_CONTROL2, TIME_UPDATE_INT_ENABLE_BIT, int_enable)?;
+
+    Ok(())
+  }
+
+
+
 
   /// Check the alarm status, and if it's triggered, clear it
   /// return bool indicating whether the alarm triggered
@@ -783,6 +827,12 @@ pub trait EventTimeStampLogger {
   /// This logs external interrupts or other events
   fn toggle_event_log(&mut self, enable: bool) -> Result<(), Self::Error>;
 
+  /// Setup event logging
+  /// - `start` Should event logging immediately start?
+  fn configure_event_logging(
+    &mut self, evt_source: u8, tsow: bool, rising: bool, int_enable: bool, start:bool)
+    -> Result<(), Self::Error>;
+
   /// Get event count -- the number of events that have been logged since enabling logging
   /// Returns the count of events since last reset, and the datetime of one event
   fn get_event_count_and_datetime(&mut self) -> Result<(u32, Option<NaiveDateTime>), Self::Error>;
@@ -839,40 +889,50 @@ impl<I2C, E> EventTimeStampLogger for  RV3028<I2C>
 {
   type Error = E;
 
+
   fn toggle_event_log(&mut self, enable: bool) -> Result<(), Self::Error> {
     self.select_mux_channel()?;
+    self.set_or_clear_reg_bits_raw(REG_CONTROL2, TIME_STAMP_ENABLE_BIT, enable)
+  }
+
+  fn configure_event_logging(
+    &mut self, evt_source: u8, tsow: bool, rising: bool, int_enable: bool, start:bool) -> Result<(), E> {
+    self.select_mux_channel()?;
+
     // Pause listening for events
     // 1. Initialize bits TSE and EIE to 0.
     self.clear_reg_bits_raw(REG_CONTROL2, TIME_STAMP_ENABLE_BIT & EVENT_INT_ENABLE_BIT)?;
-    // 2. clear EVF and BSF.
+    // Set EHL bit to 1 or 0 to choose high or low level (or rising or falling edge) detection on pin EVI.
+    self.set_or_clear_reg_bits_raw(REG_EVENT_CONTROL, EVENT_HIGH_LOW_BIT, rising)?;
+    // 2. Select TSOW (0 or 1), clear EVF and BSF.
+    self.set_or_clear_reg_bits_raw(REG_EVENT_CONTROL, TIME_STAMP_OVERWRITE_BIT, tsow)?;
     self.clear_reg_bits_raw(REG_STATUS, EVENT_FLAG_BIT & BACKUP_SWITCH_FLAG)?;
+
     // 3. Reset all Time Stamp registers to zero
     self.set_reg_bits_raw(REG_EVENT_CONTROL, TIME_STAMP_RESET_BIT)?;
+    // 4. Select the External Event Interrupt function (TSS = 0) or the Automatic Backup Switchover Interrupt
+    // function (TSS = 1) as time stamp source and initialize the appropriate function
+    let enable_bsf = evt_source == TS_EVENT_SOURCE_BSF;
+    self.set_or_clear_reg_bits_raw(REG_EVENT_CONTROL, TIME_STAMP_SOURCE_BIT, enable_bsf)?;
+    // 5. Set the TSE bit to 1 to enable the Time Stamp function.
+    // see also: toggle_event_log
+    self.set_or_clear_reg_bits_raw(REG_CONTROL2, TIME_STAMP_ENABLE_BIT, start)?;
+    // 10. Set EIE bit to 1 if you want to get a hardware interrupt on INT
+    self.set_or_clear_reg_bits(REG_CONTROL2, EVENT_INT_ENABLE_BIT, int_enable)?;
 
-    if enable {
-      // App notes recommend first disabling the event log with TSE and setting TSR
-      // 1. Initialize bits TSE and EIE to 0.
-      // 2. Select TSOW (0 or 1), clear EVF and BSF.
-      // 3. Write 1 to TSR bit, to reset all Time Stamp registers to 00h. Bit TSR always returns 0 when read.
-      // 4. Select the External Event Interrupt function (TSS = 0) or the Automatic Backup Switchover Interrupt
-      // function (TSS = 1) as time stamp source and initialize the appropriate function
-      // (see EXTERNAL EVENT INTERRUPT FUNCTION or AUTOMATIC BACKUP SWITCHOVER INTERRUPT FUNCTION).
-      // 5. Set the TSE bit to 1 to enable the Time Stamp function.
 
-      // Assume that TSOW has already been selected with toggle_time_stamp_overwrite
-      // 4. Select the External Event Interrupt function (TSS = 0)
-
-      // Clear the single event detect flag EVF and BSF
-
-      // start listening for events
-      // 5. Set the TSE bit to 1 to enable the Time Stamp function.
-      self.set_reg_bits_raw(REG_CONTROL2, TIME_STAMP_ENABLE_BIT)?;
-
-      // let conf = self.read_register_raw(REG_CONTROL2)?;
-      // assert_ne!(0, conf & TIME_STAMP_ENABLE_BIT );
-
-    }
-
+    // 1. Initialize bits TSE and EIE to 0.
+    // 2. Clear flag EVF to 0.
+    // 3. Set TSS bit to 0 to select External Event on EVI pin as Time Stamp and Interrupt source.
+    // 4. Set EHL bit to 1 or 0 to choose high or low level (or rising or falling edge) detection on pin EVI.
+    // 5. Select EDGE DETECTION (ET = 00) or LEVEL DETECTION WITH FILTERING (ET ≠ 00).
+    // 6. Set TSOW bit to 1 if the last occurred event has to be recorded and TS registers are overwritten.
+    // Hint: The counter Count TS is always working, independent of the settings of the overwrite bit TSOW.
+    // 7. Write 1 to TSR bit, to reset all Time Stamp registers to 00h. Bit TSR always returns 0 when read.
+    // 8. Set CEIE bit to 1 to enable clock output when external event occurs. See also CLOCK OUTPUT SCHEME.
+    // 9. Set TSE bit to 1 if you want to enable the Time Stamp function.
+    // 10. Set EIE bit to 1 if you want to get a hardware interrupt on INT̅ ̅ ̅ ̅ ̅
+    // pin.
     Ok(())
   }
 
