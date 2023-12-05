@@ -2,15 +2,14 @@ extern crate rv3028c7_rtc;
 
 use std::ops::{Add};
 use linux_embedded_hal::I2cdev;
-use chrono::{Datelike, Duration, NaiveDateTime, Timelike, Utc, Weekday};
+use chrono::{Duration, NaiveDateTime, Timelike, Utc};
 use rv3028c7_rtc::{RV3028};
 use rtcc::DateTimeAccess;
 
-use embedded_hal::blocking::i2c::{Write, Read, WriteRead};
 // use direct linux gpio access using cdev rather than via constrained embedded_hal methods
 use gpiocdev::{ line::{EdgeDetection} };
 
-/// Example testing real RTC interaction for alarm set/get,
+/// Example testing real RTC interaction for Periodic Countdown Timer set/get,
 /// assuming linux environment (such as Raspberry Pi 3+)
 /// with RV3028 attached to i2c1.
 /// The following was tested by enabling i2c-1 on a Raspberry Pi 3+
@@ -93,7 +92,7 @@ fn main() {
     dump_gpio_events(&gpio_int_req);
 
     let start_time = Utc::now().naive_utc();
-    rtc.toggle_countdown_timer(true);
+    rtc.toggle_countdown_timer(true).unwrap();
     rtc.toggle_countdown_int_enable(true).unwrap();
 
     let cur_dt = rtc.datetime().unwrap();
@@ -117,10 +116,10 @@ fn main() {
 
         // there's a bit of a race condition where the PTC  flag can switch high
         // after we've already checked for gpio events
-        let alarm_af = rtc.check_and_clear_countdown().unwrap();
-        if alarm_af  {
+        let triggered = rtc.check_and_clear_countdown().unwrap();
+        if triggered  {
             let cur_dt = Utc::now().naive_utc();
-            println!("{} alarm flag: {}", cur_dt, alarm_af);
+            println!("{} countdown flag: {}", cur_dt, triggered);
             dump_gpio_events(&gpio_int_req);
             println!("break on alarm_af true");
             break;
