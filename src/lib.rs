@@ -110,12 +110,20 @@ const REG_UNIX_TIME_0: u8 = 0x1B;
 // const REG_UNIX_TIME_3: u8 = 0x1E;
 
 // REG_CONTROL1 "Control 1" register bits:
-const TIMER_REPEAT_BIT: u8 = 1 << 7;// TRPT / Timer Repeat bit. Single or Repeat countdown timer
-const WADA_BIT: u8 = 1 << 5; // WADA / Weekday Alarm / Date Alarm selection bit
-const USEL_BIT: u8 = 1 << 4; //  USEL / Update Interrupt Select bit. Seconds or minutes.
-// const EERD_BIT: u8 = 1 << 3;
-const TIMER_ENABLE_BIT: u8 = 1 << 2; // TE / Periodic Countdown Timer Enable bit.
-const TIMER_CLOCK_FREQ_BITS: u8 = 0b11; // TD / Timer Clock Frequency selection bits
+#[repr(u8)]
+enum RegControl1Bits {
+  // TRPT / Timer Repeat bit. Single or Repeat countdown timer
+  TimerRepeatBit =  1 << 7,
+  // WADA / Weekday Alarm / Date Alarm selection bit
+  WadaBit = 1 << 5,
+  //  USEL / Update Interrupt Select bit. Seconds or minutes.
+  UselBit = 1 << 4, 
+  //  EERD_BIT: u8 = 1 << 3,
+  // TE / Periodic Countdown Timer Enable bit.
+  TimerEnableBit = 1 << 2,
+  // TD / Timer Clock Frequency selection bits
+  TimerClockFreqBits = 0b11;
+}
 
 /// Countown timer clock frequency selector
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -567,13 +575,16 @@ impl<I2C, E> RV3028<I2C>
     // 5. The first interrupt will occur after the next event, either second or minute change.
 
     // UIE clear
-    self.clear_reg_bits_raw(REG_CONTROL2, RegControl2Bits::TimeUpdateIntEnableBit as u8)?;
+    self.clear_reg_bits_raw(
+      REG_CONTROL2, RegControl2Bits::TimeUpdateIntEnableBit as u8)?;
     // UF clear
     self.clear_reg_bits_raw(REG_STATUS, TIME_UPDATE_FLAG)?;
     // USEL set/clear
-    self.set_or_clear_reg_bits_raw(REG_CONTROL1, USEL_BIT, minutes)?;
+    self.set_or_clear_reg_bits_raw(
+      REG_CONTROL1, RegControl1Bits::UselBit as u8, minutes)?;
     // UIE re-set
-    self.set_or_clear_reg_bits_raw(REG_CONTROL2, RegControl2Bits::TimeUpdateIntEnableBit as u8, int_enable)?;
+    self.set_or_clear_reg_bits_raw(
+      REG_CONTROL2, RegControl2Bits::TimeUpdateIntEnableBit as u8, int_enable)?;
 
     Ok(())
   }
@@ -612,7 +623,8 @@ impl<I2C, E> RV3028<I2C>
     // See the following table.
 
     // Clear WADA for weekday alarm, or set for date alarm
-    self.set_or_clear_reg_bits_raw(REG_CONTROL1, WADA_BIT, !weekday.is_some())?;
+    self.set_or_clear_reg_bits_raw(
+      REG_CONTROL1, RegControl1Bits::WadaBit as u8, !weekday.is_some())?;
 
     let bcd_minute = Self::bin_to_bcd(datetime.time().minute() as u8);
     self.write_register_raw(REG_MINUTES_ALARM,
@@ -663,7 +675,7 @@ impl<I2C, E> RV3028<I2C>
 
     let mut weekday = None;
 
-    let wada_state = self.read_register_raw(REG_CONTROL1)? & WADA_BIT;
+    let wada_state = self.read_register_raw(REG_CONTROL1)? & RegControl1Bits::WadaBit as u8;
 
     let dt =
       if 0 == wada_state {
@@ -716,11 +728,11 @@ impl<I2C, E> RV3028<I2C>
 
 
     // configure the timer clock source / period
-    self.clear_reg_bits_raw(REG_CONTROL1, TIMER_ENABLE_BIT)?;
-    self.set_or_clear_reg_bits_raw(REG_CONTROL1, TIMER_REPEAT_BIT, repeat)?;
+    self.clear_reg_bits_raw(REG_CONTROL1, RegControl1Bits::TimerEnableBit as u8)?;
+    self.set_or_clear_reg_bits_raw(REG_CONTROL1, RegControl1Bits::TimerRepeatBit as u8, repeat)?;
 
-    self.clear_reg_bits_raw(REG_CONTROL1, TIMER_CLOCK_FREQ_BITS)?;
-    self.set_reg_bits_raw(REG_CONTROL1, freq as u8)?;
+    self.clear_reg_bits_raw(REG_CONTROL1, RegControl1Bits::TimerClockFreqBits as u8)?;
+    self.set_reg_bits_raw(REG_CONTROL1, freq as u8)?; //TODO verify
 
     // write to REG_TIMER_VALUE0 and REG_TIMER_VALUE1
     let write_buf = [ REG_TIMER_VALUE0, value_low, value_high];
@@ -796,7 +808,8 @@ impl<I2C, E> RV3028<I2C>
   /// Set whether the Periodic Countdown Timer mode is repeating (periodic) or one-shot.
   /// - `enable`: If true, starts the timer countdown. If false, stops the timer.
   pub fn toggle_countdown_timer(&mut self, enable: bool)  -> Result<(), E> {
-    self.set_or_clear_reg_bits(REG_CONTROL1, TIMER_ENABLE_BIT, enable)
+    self.set_or_clear_reg_bits(
+      REG_CONTROL1, RegControl1Bits::TimerEnableBit as u8, enable)
   }
 
   // /// Check whether the Periodic Countdown Timer has finished
