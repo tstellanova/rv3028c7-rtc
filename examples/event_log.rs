@@ -48,11 +48,16 @@ fn main() {
     let init_dt = rtc.datetime().unwrap();
     println!("sys: {}\r\nrtc: {}", sys_dt, init_dt);
 
-    // rtc.configure_event_logging(
-    //     TS_EVENT_SOURCE_EVI, true, true, false, true).unwrap();
+    rtc.clear_all_int_out_bits().unwrap();
+    rtc.clear_all_int_clockout_bits().unwrap();
+    rtc.clear_all_status_flags().unwrap();
 
-    rtc.configure_event_logging(
-        TS_EVENT_SOURCE_EVI, false, true, false, true).unwrap();
+    // first enable to detection of pulses on EVI
+    rtc.config_ext_event_detection(
+        true, false, 0u8, false).unwrap();
+    // then enable saving timestamps
+    rtc.config_timestamp_logging(
+        TS_EVENT_SOURCE_EVI, true, true).unwrap();
     let (event_count, odt) =
       rtc.get_event_count_and_datetime().unwrap();
     if 0 != event_count {

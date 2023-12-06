@@ -65,7 +65,7 @@ fn main() {
     let _ = rtc.check_and_clear_countdown();
 
     let test_duration = Duration::milliseconds(1500);
-    let _estimated_duration = rtc.setup_countdown_timer(&test_duration, true).unwrap();
+    let _estimated_duration = rtc.config_countdown_timer(&test_duration, true, false).unwrap();
 
     let init_dt = rtc.datetime().unwrap();
     let alarm_dt = init_dt.add(Duration::seconds(60));

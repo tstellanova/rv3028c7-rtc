@@ -27,6 +27,7 @@ fn main() {
 
     // Create instance of the RV3028 driver
     let mut rtc1 = RV3028::new(i2c_bus);
+    // Alternate: connect via a mux
     // let mut rtc1 = RV3028::new_with_mux(i2c_bus, MUX_I2C_ADDRESS, MUX_CHAN_SECOND);
 
     let dt1 = rtc1.datetime().unwrap();

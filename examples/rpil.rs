@@ -7,14 +7,12 @@ use std::time::Duration;
 use std::thread::sleep;
 use rtcc::DateTimeAccess;
 
-
 /// Example testing real RTC communications,
 /// assuming linux environment (such as Raspberry Pi 3+)
 /// with RV3028 attached to i2c1.
 /// The following was tested by enabling i2c-1 on a Raspberry Pi 3+
 /// using `sudo raspi-config`
 /// and connecting the SDA, SCL, GND, and 3.3V pins from RPi to the RTC
-
 
 fn get_sys_timestamp() -> (NaiveDateTime, u32) {
     let now = Utc::now();
@@ -51,7 +49,6 @@ fn main() {
              hours, minutes, seconds);
     println!("sys time: {:02}:{:02}:{:02}",
              sys_datetime.time().hour(), sys_datetime.time().minute(), sys_datetime.time().second());
-
 
     // check the drift over and over again
     loop {

@@ -18,7 +18,7 @@ fn test_one_shot_duration<I2C,E>(rtc: &mut RV3028<I2C>, duration: &Duration) -> 
   rtc.clear_all_int_out_bits()?;
   rtc.toggle_countdown_timer(false)?;
   rtc.check_and_clear_countdown()?;
-  let estimated_duration = rtc.setup_countdown_timer(duration, false)?;
+  let estimated_duration = rtc.config_countdown_timer(duration, false, false)?;
   // account for supposed maximum uncertainty in RTC durations
   let expected_sleep =
     if estimated_duration.le(&Duration::microseconds(4096 * 245)){
@@ -69,7 +69,7 @@ fn test_periodic_duration<I2C,E>(rtc: &mut RV3028<I2C>, duration: &Duration) -> 
   rtc.toggle_countdown_timer(false)?;
   rtc.check_and_clear_countdown()?;
 
-  let estimated_duration = rtc.setup_countdown_timer(duration, true)?;
+  let estimated_duration = rtc.config_countdown_timer(duration, true, false)?;
   // we don't adjust for the first duration uncertainty, assuming it will average out
   let expected_sleep =    estimated_duration;
   println!("> periodic {} sleep {} ", duration, expected_sleep);
