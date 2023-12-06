@@ -49,9 +49,9 @@ fn main() {
   rtc1.clear_all_int_out_bits().unwrap();
   rtc2.clear_all_int_out_bits().unwrap();
   rtc3.clear_all_int_out_bits().unwrap();
-  rtc1.toggle_clock_output(false).unwrap();
-  rtc2.toggle_clock_output(false).unwrap();
-  rtc3.toggle_clock_output(false).unwrap();
+  rtc1.toggle_plain_clockout(false).unwrap();
+  rtc2.toggle_plain_clockout(false).unwrap();
+  rtc3.toggle_plain_clockout(false).unwrap();
 
   rtc1.check_and_clear_alarm().unwrap();
   rtc2.check_and_clear_alarm().unwrap();

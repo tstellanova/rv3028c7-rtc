@@ -203,6 +203,8 @@ enum RegClockIntMaskBits {
 enum RegControl2Bits {
   // TSE / Time Stamp Enable bit
   TimeStampEnableBit = 1 << 7,
+  // CLKIE / Clock Output enabled by Interrupt source. (see also CLKOE)
+  ClockoutIntEnableBit = 1 << 6,
   // UIE / Time Update Interrupt Enable
   TimeUpdateIntEnableBit = 1 << 5,
   // TIE Countdown Timer Interrupt Enable bit
@@ -216,8 +218,8 @@ enum RegControl2Bits {
 // EEPROM_MIRROR_ADDRESS / EEPROM mirror register bits:
 #[repr(u8)]
 enum RegEepromMirrorBits {
-  // CLKOE / CLKOUT Enable bit`
-  ClockOutEnableBit = 1 << 7,
+  // CLKOE / CLKOUT Enable bit -- if 1 (default) then normal clock output
+  ClockoutOutputEnableBit = 1 << 7,
   // BCIE / Backup Switchover Interrupt Enable bit bit
   BackupSwitchIntEnableBit = 1 << 6,
   // TCE bit
@@ -786,12 +788,19 @@ impl<I2C, E> RV3028<I2C>
   }
 
 
-  /// Enables or disables CLKOUT
-  pub fn toggle_clock_output(&mut self, enable: bool)  -> Result<(), E> {
+  /// Enables or disables default CLKOUT behavior
+  pub fn toggle_plain_clockout(&mut self, enable: bool) -> Result<(), E> {
     self.select_mux_channel()?;
-    self.clear_reg_bits_raw(REG_STATUS, RegStatusBits::ClockIntFlagBit as u8)?;
+    // TODO self.clear_reg_bits_raw(REG_STATUS, RegStatusBits::ClockIntFlagBit as u8)?;
     self.set_or_clear_reg_bits_raw(
-      EEPROM_MIRROR_ADDRESS, RegEepromMirrorBits::ClockOutEnableBit as u8, enable)
+      EEPROM_MIRROR_ADDRESS, RegEepromMirrorBits::ClockoutOutputEnableBit as u8, enable)
+  }
+
+  /// Enables or disables interrupt-controlled CLKOUT
+  pub fn toggle_int_clockout(&mut self, enable: bool)  -> Result<(), E> {
+    self.select_mux_channel()?;
+    self.set_or_clear_reg_bits_raw(
+    REG_STATUS, RegStatusBits::ClockoutIntEnableBit as u8, enable)
   }
 
   // Configure the Periodic Countdown Timer prior to the next countdown.
