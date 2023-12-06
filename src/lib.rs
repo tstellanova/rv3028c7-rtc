@@ -170,7 +170,7 @@ const EEPROM_MIRROR_ADDRESS: u8 = 0x37;// RAM mirror of EEPROM config values
 // REG_EVENT_CONTROL Event Control register bits:   EHL, ET, TSR, TSOW, TSS
 #[repr(u8)]
 enum RegEventControlBits {
-  // EHL bit
+  // EHL bit / Event High/Low Level (Rising/Falling Edge) selection for detection
   EventHighLowBit = 1 << 6,
   // ET bits / Event Filtering Time
   EventFilteringTimeBits = 0b11 << 4,
@@ -329,6 +329,14 @@ impl<I2C, E> RV3028<I2C>
   pub fn check_and_clear_power_on_reset(&mut self) -> Result<bool, E>  {
     let flag_set = 0 != self.check_and_clear_bits(
       REG_STATUS, RegStatusBits::PowerOnResetFlagBit as u8)?;
+    Ok(flag_set)
+  }
+
+  /// Check whether an external event has been detected
+  /// (an appropriate input signal on the EVI pin)
+  pub fn check_and_clear_ext_event(&mut self)-> Result<bool, E>  {
+    let flag_set = 0 != self.check_and_clear_bits(
+      REG_STATUS, RegStatusBits::EventFlagBit as u8)?;
     Ok(flag_set)
   }
 
@@ -800,7 +808,7 @@ impl<I2C, E> RV3028<I2C>
   pub fn toggle_int_clockout(&mut self, enable: bool)  -> Result<(), E> {
     self.select_mux_channel()?;
     self.set_or_clear_reg_bits_raw(
-    REG_STATUS, RegStatusBits::ClockoutIntEnableBit as u8, enable)
+    REG_CONTROL2,  RegControl2Bits::ClockoutIntEnableBit as u8, enable)
   }
 
   // Configure the Periodic Countdown Timer prior to the next countdown.
@@ -941,47 +949,47 @@ impl<I2C, E> RV3028<I2C>
   /// - `int_enable` whether events detected on EVI pin should generate an interrupt on INT pin
   /// - `filtering` 00..11 time filtering
   pub fn config_ext_event_detection(
-    &mut self, rising: bool, int_enable: bool, _filtering: u8, clockout_enable: bool) -> Result<(), E>
+    &mut self, rising: bool, int_enable: bool, filtering: u8, clockout_enable: bool) -> Result<(), E>
   {
     self.select_mux_channel()?;
 
+    // 1. Initialize bits TSE and EIE to 0.
+    // 2. Clear flag EVF to 0.
+    // 4. Set EHL bit to 1 or 0 to choose high or low level (or rising or falling edge) detection on pin EVI.
+    // 5. Select EDGE DETECTION (ET = 00) or LEVEL DETECTION WITH FILTERING (ET ≠ 00).
+    // 8. Set CEIE bit to 1 to enable clock output when external event occurs. See also CLOCK OUTPUT SCHEME.
+    // 10. Set EIE bit to 1 if you want to get a hardware interrupt on INT̅ ̅ ̅ ̅ ̅
+    // pin.
+
     // Pause listening for external events on EVI pin
-    // 1. Initialize EIE to 0.
+    // 1. Initialize  EIE to 0.
     self.clear_reg_bits_raw(REG_CONTROL2,
                               RegControl2Bits::EventIntEnableBit  as u8)?;
+    // 2. Clear flag EVF to 0.
+    self.clear_reg_bits_raw(
+      REG_STATUS, RegStatusBits::EventFlagBit as u8)?;
 
-    // 4. Set EHL bit to 1 or 0 to choose high or low level (or rising or falling edge) detection on pin EVI.
-    self.clear_reg_bits_raw(REG_EVENT_CONTROL,RegEventControlBits::EventFilteringTimeBits as u8)?;
-    //TODO verify: ET bits -- filter time
-    // self.set_reg_bits_raw(
-    //   REG_EVENT_CONTROL,
-    //   RegEventControlBits::EventFilteringTimeBits as u8,
-    //   filtering & 0xFF)?;
-
-    // Set EHL bit to 1 or 0 to choose high or low level (or rising or falling edge) detection on pin EVI.
+    // 4. Set EHL bit to 1 or 0 to choose high or low level
+    // (or rising or falling edge) detection on pin EVI.
     self.set_or_clear_reg_bits_raw(
       REG_EVENT_CONTROL, RegEventControlBits::EventHighLowBit as u8, rising)?;
 
-    // 8. Set CEIE bit to 1 to enable clock output when external event occurs. See also CLOCK OUTPUT SCHEME.
+    // 5. Select EDGE DETECTION (ET = 00) or LEVEL DETECTION WITH FILTERING (ET ≠ 00).
+    self.clear_reg_bits_raw(REG_EVENT_CONTROL,RegEventControlBits::EventFilteringTimeBits as u8)?;
+    if 0 != filtering {
+      // TODO verify this sets the correct filtering
+      self.set_reg_bits_raw(REG_EVENT_CONTROL, filtering << 4)?;
+    }
+
+    // 8. Set CEIE bit to 1 to enable clock output when external event occurs.
+    // See also CLOCK OUTPUT SCHEME.
     self.set_or_clear_reg_bits_raw(
       REG_CLOCK_INTERRUPT_MASK, RegClockIntMaskBits::ClockoutOnExtEvtBit as u8, clockout_enable)?;
 
-    // 10. Set EIE bit to 1 if you want to get a hardware interrupt on INT
+    // 10. Set EIE bit to 1 if you want to get a hardware interrupt on INT pin
     self.set_or_clear_reg_bits_raw(
       REG_CONTROL2, RegControl2Bits::EventIntEnableBit as u8, int_enable)?;
 
-    // 1. Initialize bits TSE and EIE to 0.
-    // 2. Clear flag EVF to 0.
-    // 3. Set TSS bit to 0 to select External Event on EVI pin as Time Stamp and Interrupt source.
-    // 4. Set EHL bit to 1 or 0 to choose high or low level (or rising or falling edge) detection on pin EVI.
-    // 5. Select EDGE DETECTION (ET = 00) or LEVEL DETECTION WITH FILTERING (ET ≠ 00).
-    // 6. Set TSOW bit to 1 if the last occurred event has to be recorded and TS registers are overwritten.
-    // Hint: The counter Count TS is always working, independent of the settings of the overwrite bit TSOW.
-    // 7. Write 1 to TSR bit, to reset all Time Stamp registers to 00h. Bit TSR always returns 0 when read.
-    // 8. Set CEIE bit to 1 to enable clock output when external event occurs. See also CLOCK OUTPUT SCHEME.
-    // 9. Set TSE bit to 1 if you want to enable the Time Stamp function.
-    // 10. Set EIE bit to 1 if you want to get a hardware interrupt on INT̅ ̅ ̅ ̅ ̅
-    // pin.
     Ok(())
   }
 

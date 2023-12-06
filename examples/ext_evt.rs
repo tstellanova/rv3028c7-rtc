@@ -3,7 +3,6 @@ extern crate rv3028c7_rtc;
 use linux_embedded_hal::I2cdev;
 use chrono::{Duration, Utc};
 use rv3028c7_rtc::{RV3028, EventTimeStampLogger, TS_EVENT_SOURCE_EVI};
-use std::thread::sleep;
 use gpiocdev::{ Request, line::{Value} };
 
 // use linux_embedded_hal::{CdevPin, gpio_cdev::{Chip, LineRequestFlags}};
@@ -26,7 +25,7 @@ const GPIO_OUT_PIN: u32 = 27;
 /// and connecting a gpio output pin  from rpi to the EVI pin of the RTC
 
 
-fn send_pulses(num_pulses: u32, out_pin: u32) {
+fn send_rising_gpio_pulses(num_pulses: u32, out_pin: u32, active: Duration, inactive: Duration) {
   // Grab a GPIO output pin on the host for sending digital signals to RTC
   // This is a specific configuration for Raspberry Pi -- YMMV
   let gpio_req = Request::builder()
@@ -36,20 +35,54 @@ fn send_pulses(num_pulses: u32, out_pin: u32) {
     .as_output(Value::Inactive)
     .request().unwrap();
 
-  let pulse_active_time = Duration::milliseconds(50);
-  let pulse_inactive_time = Duration::milliseconds(300);
   for _i in 0..num_pulses {
-    println!("Pulse active for {}",pulse_active_time);
-    let _ = gpio_req.set_value(out_pin, Value::Active);
-    sleep(pulse_active_time.to_std().unwrap());
+    //initially inactive
     let _ = gpio_req.set_value(out_pin, Value::Inactive);
-    println!("Pulse inactive for {}",pulse_inactive_time);
-    sleep(pulse_inactive_time.to_std().unwrap());
+    std::thread::sleep(inactive.to_std().unwrap());
+    let _ = gpio_req.set_value(out_pin, Value::Active);
+    std::thread::sleep(active.to_std().unwrap());
   }
 
-}
-fn main() {
+  //reset to inactive after
+  let _ = gpio_req.set_value(out_pin, Value::Inactive);
 
+}
+
+fn send_falling_gpio_pulses(num_pulses: u32, out_pin: u32, active: Duration, inactive: Duration) {
+  // Grab a GPIO output pin on the host for sending digital signals to RTC
+  // This is a specific configuration for Raspberry Pi -- YMMV
+  let gpio_req = Request::builder()
+    .on_chip("/dev/gpiochip0")
+    .with_line(out_pin)
+    // initially inactive (low)
+    .as_output(Value::Inactive)
+    .request().unwrap();
+
+  for _i in 0..num_pulses {
+    let _ = gpio_req.set_value(out_pin, Value::Active);
+    std::thread::sleep(active.to_std().unwrap());
+    let _ = gpio_req.set_value(out_pin, Value::Inactive);
+    std::thread::sleep(inactive.to_std().unwrap());
+  }
+
+  let _ = gpio_req.set_value(out_pin, Value::Inactive);
+
+}
+
+
+fn dump_events(rtc: &mut RV3028<I2cdev>) {
+  // find out how many pulses the RTC observed on its EVI pin
+  let (event_count, odt) =
+    rtc.get_event_count_and_datetime().unwrap();
+  println!("event_count: {}", event_count);
+  if 0 != event_count {
+    let dt = odt.unwrap();
+    let now = Utc::now().naive_utc();
+    println!("event dt: {} sys: {}", dt, now);
+  }
+}
+
+fn main() {
   // Initialize the I2C device
   let i2c = I2cdev::new("/dev/i2c-1").expect("Failed to open I2C device");
 
@@ -70,26 +103,34 @@ fn main() {
   rtc.clear_all_int_clockout_bits().unwrap();
   rtc.clear_all_status_flags().unwrap();
 
-  // Configure the RTC for external events on EVI pin
-  rtc.config_ext_event_detection(
-    true, false, 0u8, false).unwrap();
-
-  // Start the time stamp function recording
+  //  timestamp logging -- TSE needs to be enabled in order for EVI events to be detected?
+  // rtc.toggle_timestamp_logging(true).unwrap();
   rtc.config_timestamp_logging(
     TS_EVENT_SOURCE_EVI, true, true).unwrap();
 
   // send a series of pulses on the hosts GPIO output pin
-  let num_pulses = 10;
-  send_pulses(num_pulses, GPIO_OUT_PIN);
 
-  // find out how many pulses the RTC observed on its EVI pin
-  let (event_count, odt) =
-    rtc.get_event_count_and_datetime().unwrap();
-  println!("pulses: {} event_count: {}", num_pulses, event_count);
-  if 0 != event_count {
-    let dt = odt.unwrap();
-    let now = Utc::now().naive_utc();
-    println!("event dt: {} sys: {}", dt, now);
+  // Configure the RTC for falling external events on EVI pin
+  rtc.config_ext_event_detection(
+    false, false, 0b00, false).unwrap();
+  send_falling_gpio_pulses( 3,
+    GPIO_OUT_PIN, Duration::milliseconds(300), Duration::milliseconds(100));
+  let triggered = rtc.check_and_clear_ext_event().unwrap();
+  if triggered {
+    println!("falling triggered: {}", triggered);
+    dump_events(&mut rtc);
   }
+
+  // Configure the RTC for rising external events on EVI pin
+  rtc.config_ext_event_detection(
+    true, false, 0b00, false).unwrap();
+  send_rising_gpio_pulses(3,
+    GPIO_OUT_PIN, Duration::milliseconds(100), Duration::milliseconds(300));
+  let triggered = rtc.check_and_clear_ext_event().unwrap();
+  if triggered {
+    println!("rising triggered: {}", triggered);
+    dump_events(&mut rtc);
+  }
+
 
 }
