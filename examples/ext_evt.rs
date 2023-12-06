@@ -45,6 +45,7 @@ fn send_rising_gpio_pulses(num_pulses: u32, out_pin: u32, active: Duration, inac
 
   //reset to inactive after
   let _ = gpio_req.set_value(out_pin, Value::Inactive);
+  std::thread::sleep(Duration::seconds(1).to_std().unwrap());
 
 }
 
@@ -54,8 +55,8 @@ fn send_falling_gpio_pulses(num_pulses: u32, out_pin: u32, active: Duration, ina
   let gpio_req = Request::builder()
     .on_chip("/dev/gpiochip0")
     .with_line(out_pin)
-    // initially inactive (low)
-    .as_output(Value::Inactive)
+    // initially active (high)
+    .as_output(Value::Active)
     .request().unwrap();
 
   for _i in 0..num_pulses {
@@ -66,6 +67,7 @@ fn send_falling_gpio_pulses(num_pulses: u32, out_pin: u32, active: Duration, ina
   }
 
   let _ = gpio_req.set_value(out_pin, Value::Inactive);
+  std::thread::sleep(Duration::seconds(1).to_std().unwrap());
 
 }
 
@@ -104,31 +106,31 @@ fn main() {
   rtc.clear_all_status_flags().unwrap();
 
   //  timestamp logging -- TSE needs to be enabled in order for EVI events to be detected?
-  // rtc.toggle_timestamp_logging(true).unwrap();
   rtc.config_timestamp_logging(
-    TS_EVENT_SOURCE_EVI, true, true).unwrap();
+    TS_EVENT_SOURCE_EVI, true, false).unwrap();
 
   // send a series of pulses on the hosts GPIO output pin
 
-  // Configure the RTC for falling external events on EVI pin
+
+  rtc.toggle_timestamp_logging(true).unwrap();
+  // Configure the RTC for rising external events on EVI pin
   rtc.config_ext_event_detection(
-    false, false, 0b00, false).unwrap();
-  send_falling_gpio_pulses( 3,
-    GPIO_OUT_PIN, Duration::milliseconds(300), Duration::milliseconds(100));
-  let triggered = rtc.check_and_clear_ext_event().unwrap();
-  if triggered {
-    println!("falling triggered: {}", triggered);
+    true, false, 0b01, false).unwrap();
+  send_rising_gpio_pulses(3,
+    GPIO_OUT_PIN, Duration::milliseconds(10), Duration::milliseconds(100));
+  if rtc.check_and_clear_ext_event().unwrap() {
+    println!("rising triggered");
     dump_events(&mut rtc);
   }
 
-  // Configure the RTC for rising external events on EVI pin
+  rtc.toggle_timestamp_logging(true).unwrap();
+  // Configure the RTC for falling external events on EVI pin
   rtc.config_ext_event_detection(
-    true, false, 0b00, false).unwrap();
-  send_rising_gpio_pulses(3,
-    GPIO_OUT_PIN, Duration::milliseconds(100), Duration::milliseconds(300));
-  let triggered = rtc.check_and_clear_ext_event().unwrap();
-  if triggered {
-    println!("rising triggered: {}", triggered);
+    false, false, 0b01, false).unwrap();
+  send_falling_gpio_pulses( 3,
+                            GPIO_OUT_PIN, Duration::milliseconds(100), Duration::milliseconds(10));
+  if rtc.check_and_clear_ext_event().unwrap() {
+    println!("falling triggered");
     dump_events(&mut rtc);
   }
 
