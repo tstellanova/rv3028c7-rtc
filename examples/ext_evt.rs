@@ -26,6 +26,7 @@ const GPIO_OUT_PIN: u32 = 27;
 
 
 fn send_rising_gpio_pulses(num_pulses: u32, out_pin: u32, active: Duration, inactive: Duration) {
+  println!("send rising: {} out_pin: {}", num_pulses, out_pin);
   // Grab a GPIO output pin on the host for sending digital signals to RTC
   // This is a specific configuration for Raspberry Pi -- YMMV
   let gpio_req = Request::builder()
@@ -34,6 +35,9 @@ fn send_rising_gpio_pulses(num_pulses: u32, out_pin: u32, active: Duration, inac
     // initially inactive (low)
     .as_output(Value::Inactive)
     .request().unwrap();
+
+  println!("rising...");
+  std::thread::sleep(Duration::seconds(1).to_std().unwrap());
 
   for _i in 0..num_pulses {
     //initially inactive
@@ -44,12 +48,15 @@ fn send_rising_gpio_pulses(num_pulses: u32, out_pin: u32, active: Duration, inac
   }
 
   //reset to inactive after
+  std::thread::sleep(Duration::seconds(2).to_std().unwrap());
   let _ = gpio_req.set_value(out_pin, Value::Inactive);
-  std::thread::sleep(Duration::seconds(1).to_std().unwrap());
+
 
 }
 
-fn send_falling_gpio_pulses(num_pulses: u32, out_pin: u32, active: Duration, inactive: Duration) {
+fn send_falling_gpio_pulses(num_pulses: u32, out_pin: u32,  active: Duration, inactive: Duration) {
+  println!("send falling: {} out_pin: {}", num_pulses, out_pin);
+
   // Grab a GPIO output pin on the host for sending digital signals to RTC
   // This is a specific configuration for Raspberry Pi -- YMMV
   let gpio_req = Request::builder()
@@ -59,6 +66,9 @@ fn send_falling_gpio_pulses(num_pulses: u32, out_pin: u32, active: Duration, ina
     .as_output(Value::Active)
     .request().unwrap();
 
+  println!("falling...");
+  std::thread::sleep(Duration::seconds(1).to_std().unwrap());
+
   for _i in 0..num_pulses {
     let _ = gpio_req.set_value(out_pin, Value::Active);
     std::thread::sleep(active.to_std().unwrap());
@@ -66,8 +76,7 @@ fn send_falling_gpio_pulses(num_pulses: u32, out_pin: u32, active: Duration, ina
     std::thread::sleep(inactive.to_std().unwrap());
   }
 
-  let _ = gpio_req.set_value(out_pin, Value::Inactive);
-  std::thread::sleep(Duration::seconds(1).to_std().unwrap());
+  std::thread::sleep(Duration::seconds(2).to_std().unwrap());
 
 }
 
@@ -105,34 +114,34 @@ fn main() {
   rtc.clear_all_int_clockout_bits().unwrap();
   rtc.clear_all_status_flags().unwrap();
 
-  //  timestamp logging -- TSE needs to be enabled in order for EVI events to be detected?
+  // rtc.toggle_timestamp_logging(false).unwrap();
+  // rtc.reset_timestamp_log().unwrap();
+
   rtc.config_timestamp_logging(
-    TS_EVENT_SOURCE_EVI, true, false).unwrap();
+    TS_EVENT_SOURCE_EVI, true, true).unwrap();
 
-  // send a series of pulses on the hosts GPIO output pin
+  // send a series of pulses on the host's GPIO output pin
 
-
-  rtc.toggle_timestamp_logging(true).unwrap();
-  // Configure the RTC for rising external events on EVI pin
-  rtc.config_ext_event_detection(
-    true, false, 0b01, false).unwrap();
-  send_rising_gpio_pulses(3,
-    GPIO_OUT_PIN, Duration::milliseconds(10), Duration::milliseconds(100));
-  if rtc.check_and_clear_ext_event().unwrap() {
-    println!("rising triggered");
-    dump_events(&mut rtc);
-  }
-
-  rtc.toggle_timestamp_logging(true).unwrap();
   // Configure the RTC for falling external events on EVI pin
   rtc.config_ext_event_detection(
-    false, false, 0b01, false).unwrap();
-  send_falling_gpio_pulses( 3,
-                            GPIO_OUT_PIN, Duration::milliseconds(100), Duration::milliseconds(10));
+    false, false, 0b00, false).unwrap();
+  send_falling_gpio_pulses( 3, GPIO_OUT_PIN,
+                            Duration::milliseconds(1000), Duration::milliseconds(100));
   if rtc.check_and_clear_ext_event().unwrap() {
     println!("falling triggered");
     dump_events(&mut rtc);
   }
 
+  rtc.reset_timestamp_log().unwrap();
+
+  // Configure the RTC for rising external events on EVI pin
+  rtc.config_ext_event_detection(
+    true, false, 0b00, false).unwrap();
+  send_rising_gpio_pulses(3, GPIO_OUT_PIN,
+                          Duration::milliseconds(100), Duration::milliseconds(1000));
+  if rtc.check_and_clear_ext_event().unwrap() {
+    println!("rising triggered");
+    dump_events(&mut rtc);
+  }
 
 }

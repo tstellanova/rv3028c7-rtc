@@ -962,7 +962,7 @@ impl<I2C, E> RV3028<I2C>
     // pin.
 
     // Pause listening for external events on EVI pin
-    // 1. Initialize  EIE to 0.
+    // 1. Initialize EIE to 0.
     self.clear_reg_bits_raw(REG_CONTROL2,
                               RegControl2Bits::EventIntEnableBit  as u8)?;
     // 2. Clear flag EVF to 0.
@@ -1003,6 +1003,9 @@ pub trait EventTimeStampLogger {
   /// Enable or disable the Time Stamp Function for event logging
   /// This logs external interrupts or other events
   fn toggle_timestamp_logging(&mut self, enable: bool) -> Result<(), Self::Error>;
+
+  /// clear out any existing logged event timestamps
+  fn reset_timestamp_log(&mut self) -> Result<(), Self::Error>;
 
   /// Setup time stamp logging for events
   /// - `evt_source` source for timestamp events, eg TS_EVENT_SOURCE_BSF
@@ -1072,6 +1075,13 @@ impl<I2C, E> EventTimeStampLogger for  RV3028<I2C>
   fn toggle_timestamp_logging(&mut self, enable: bool) -> Result<(), Self::Error> {
     self.select_mux_channel()?;
     self.set_or_clear_reg_bits_raw(REG_CONTROL2, RegControl2Bits::TimeStampEnableBit as u8, enable)
+  }
+
+  fn reset_timestamp_log(&mut self) -> Result<(), Self::Error> {
+    self.select_mux_channel()?;
+    self.set_reg_bits_raw(
+      REG_EVENT_CONTROL, RegEventControlBits::TimeStampResetBit as u8)
+
   }
 
   fn config_timestamp_logging(
