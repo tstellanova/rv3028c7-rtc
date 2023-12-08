@@ -90,6 +90,13 @@ const REG_CONTROL1:u8  = 0x0F;
 // - hour mode and time stamp enable
 const REG_CONTROL2:u8 = 0x10;
 
+// Clock Interrupt Mask
+// This register is used to select a predefined interrupt for automatic clock output.
+// Setting a bit to 1 selects the corresponding interrupt.
+// Multiple interrupts can be selected.
+// After power on, no interrupt is selected (see CLOCK OUTPUT SCHEME).
+const REG_CLOCK_INTERRUPT_MASK:u8 = 0x12;
+
 // Event Control register: EHL, ET,TSR, TSOW, TSS
 const REG_EVENT_CONTROL: u8 = 0x13;
 
@@ -110,12 +117,20 @@ const REG_UNIX_TIME_0: u8 = 0x1B;
 // const REG_UNIX_TIME_3: u8 = 0x1E;
 
 // REG_CONTROL1 "Control 1" register bits:
-const TIMER_REPEAT_BIT: u8 = 1 << 7;// TRPT / Timer Repeat bit. Single or Repeat countdown timer
-const WADA_BIT: u8 = 1 << 5; // WADA / Weekday Alarm / Date Alarm selection bit
-// const USEL_BIT: u8 = 1 << 4;
-// const EERD_BIT: u8 = 1 << 3;
-const TIMER_ENABLE_BIT: u8 = 1 << 2; // TE / Periodic Countdown Timer Enable bit.
-const TIMER_CLOCK_FREQ_BITS: u8 = 0b11; // TD / Timer Clock Frequency selection bits
+#[repr(u8)]
+enum RegControl1Bits {
+  // TRPT / Timer Repeat bit. Single or Repeat countdown timer
+  TimerRepeatBit =  1 << 7,
+  // WADA / Weekday Alarm / Date Alarm selection bit
+  WadaBit = 1 << 5,
+  //  USEL / Update Interrupt Select bit. Seconds or minutes.
+  UselBit = 1 << 4,
+  //  EERD_BIT: u8 = 1 << 3,
+  // TE / Periodic Countdown Timer Enable bit.
+  TimerEnableBit = 1 << 2,
+  // TD / Timer Clock Frequency selection bits
+  TimerClockFreqBits = 0b11,
+}
 
 /// Countown timer clock frequency selector
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -127,14 +142,24 @@ enum TimerClockFreq {
 }
 
 // REG_STATUS Status register bits:
-// const EEBUSY_BIT: u8 = 1 << 7;
-const CLOCK_INT_FLAG_BIT: u8 = 1 << 6; // CLKF  / Clock Output Interrupt Flag
-const BACKUP_SWITCH_FLAG: u8 = 1 << 4; // BSF bit
-const PERIODIC_TIMER_FLAG: u8 = 1 << 3; // TF bit / Periodic Countdown Timer Flag
-const ALARM_FLAG_BIT : u8 = 1 << 2; // AF / Alarm Flag
-const EVENT_FLAG_BIT: u8 = 1 << 1; // EVF / Event Flag (external event interrupt)
-
-
+#[repr(u8)]
+enum RegStatusBits {
+  //EEBUSY_BIT = 1 << 7,
+  // CLKF  / Clock Output Interrupt Flag
+  ClockIntFlagBit = 1 << 6,
+  // BSF bit
+  BackupSwitchFlag = 1 << 5,
+  // UF / Periodic Time Update Flag
+  TimeUpdateFlag = 1 << 4,
+  // TF bit / Periodic Countdown Timer Flag
+  PeriodicTimerFlag = 1 << 3,
+  // AF / Alarm Flag
+  AlarmFlagBit = 1 << 2,
+  // EVF / Event Flag (external event interrupt)
+  EventFlagBit = 1 << 1,
+  // PORF / Power On Reset Flag
+  PowerOnResetFlagBit = 1 << 0,
+}
 
 // EEPROM register addresses and commands
 const EEPROM_MIRROR_ADDRESS: u8 = 0x37;// RAM mirror of EEPROM config values
@@ -143,29 +168,68 @@ const EEPROM_MIRROR_ADDRESS: u8 = 0x37;// RAM mirror of EEPROM config values
 
 
 // REG_EVENT_CONTROL Event Control register bits:   EHL, ET, TSR, TSOW, TSS
-const EVENT_HIGH_LOW_BIT: u8 = 1 << 6; // EHL bit
-const TIME_STAMP_RESET_BIT: u8 = 1 << 2; // TSR bit
-const TIME_STAMP_OVERWRITE_BIT: u8 = 1 << 1; // TSOW bit
-const TIME_STAMP_SOURCE_BIT: u8 = 1 << 0; // TSS bit
+#[repr(u8)]
+enum RegEventControlBits {
+  // EHL bit / Event High/Low Level (Rising/Falling Edge) selection for detection
+  EventHighLowBit = 1 << 6,
+  // ET bits / Event Filtering Time
+  EventFilteringTimeBits = 0b11 << 4,
+  // TSR bit
+  TimeStampResetBit = 1 << 2,
+  // TSOW bit
+  TimeStampOverwriteBit = 1 << 1,
+  // TSS / Time Stamp Source bit
+  TimeStampSourceBit = 1 << 0,
+}
 
 pub const TS_EVENT_SOURCE_EVI: u8 = 0; /// Event log source is external interrupt EVI (default)
 pub const TS_EVENT_SOURCE_BSF: u8 = 1; /// Event log source is backup power switchover
 
+// REG_CLOCK_INTERRUPT_MASK bits
+#[repr(u8)]
+enum RegClockIntMaskBits {
+  // CEIE / Clock output on Event Interrupt bit
+  ClockoutOnExtEvtBit = 1 << 3,
+  // CAIE / Clock output on Alarm Interrupt bit
+  ClockoutOnAlarmBit = 1 << 2,
+  // CTIE / Clock output on Periodic Countdown Timer Interrupt bit
+  ClockoutOnPctBit = 1 << 1,
+  // CUIE / Clock output on Periodic Time Update Interrupt bit
+  ClockoutOnUpdateBit = 1 << 0,
+}
+
 // REG_CONTROL2 "Control 2" register bits: TSE CLKIE UIE TIE AIE EIE 12_24 RESET
-const TIME_STAMP_ENABLE_BIT: u8 = 1 << 7; // TSE / Time Stamp Enable bit
-const TIME_UPDATE_INT_ENABLE_BIT: u8 = 1 << 5; // UIE / Time Update Interrupt Enable
-const TIMER_INT_ENABLE_BITL: u8 = 1 << 4;// TIE Countdown Timer Interrupt Enable bit
-const ALARM_INT_ENABLE_BIT: u8 = 1 << 3;// AIE / Alarm Interrupt Enable bit
-const EVENT_INT_ENABLE_BIT: u8 = 1 << 2;// EIE / Event Interrupt Enable bit
+#[repr(u8)]
+enum RegControl2Bits {
+  // TSE / Time Stamp Enable bit
+  TimeStampEnableBit = 1 << 7,
+  // CLKIE / Clock Output enabled by Interrupt source. (see also CLKOE)
+  ClockoutIntEnableBit = 1 << 6,
+  // UIE / Time Update Interrupt Enable
+  TimeUpdateIntEnableBit = 1 << 5,
+  // TIE Countdown Timer Interrupt Enable bit
+  TimerIntEnableBit = 1 << 4,
+  // AIE / Alarm Interrupt Enable bit
+  AlarmIntEnableBit = 1 << 3,
+  // EIE / Event Interrupt Enable bit
+  EventIntEnableBit = 1 << 2,
+}
 
 // EEPROM_MIRROR_ADDRESS / EEPROM mirror register bits:
-const CLOCK_OUT_ENABLE_BIT:u8 = 1<< 7; // CLKOE / CLKOUT Enable bit
-const BACKUP_SWITCH_INT_ENABLE_BIT:u8 = 1 << 6; // BCIE / Backup Switchover Interrupt Enable bit bit
-const TRICKLE_CHARGE_ENABLE_BIT: u8 = 1 << 5; // TCE bit
-const BACKUP_SWITCHOVER_BITS:  u8  = 0b11 << 2; // Backup Switchover Mode / BSM bits
-const BACKUP_SWITCHOVER_DSM:  u8  = 0b01 << 2; // Backup Switchover Mode / BSM bits as DSM
+#[repr(u8)]
+enum RegEepromMirrorBits {
+  // CLKOE / CLKOUT Enable bit -- if 1 (default) then normal clock output
+  ClockoutOutputEnableBit = 1 << 7,
+  // BCIE / Backup Switchover Interrupt Enable bit bit
+  BackupSwitchIntEnableBit = 1 << 6,
+  // TCE bit
+  TrickleChargeEnableBit = 1 << 5,
+  // BackupSwitchoverLsm = 0b11 << 2,
+  // Backup Switchover Mode / BSM bits as DSM
+  BackupSwitchoverDsm = 0b01 << 2,
+  TrickleChargeResistanceBits = 0b11, // TCR bits
+}
 
-const TRICKLE_CHARGE_RESISTANCE_BITS: u8 = 0b11; // TCR bits
 #[derive(Clone, Copy)]
 pub enum TrickleChargeCurrentLimiter {
   Ohms3k = 0b00,
@@ -254,8 +318,27 @@ impl<I2C, E> RV3028<I2C>
     Ok(buf[0])
   }
 
-  //clear_register
 
+  /// Check whether the Power On Reset flag is set.
+  /// If this flag is cleared (set to zero) beforehand,
+  /// indicates a voltage drop below VPOR.
+  /// If this flag is set, the data in the device RAM registers are no longer valid
+  /// and all registers must be (re)initialized.
+  /// The flag value 1 is retained until a 0 is written by the user.
+  /// At power up (POR) the value is set to 1, the user has to write 0 to the flag to use it.
+  pub fn check_and_clear_power_on_reset(&mut self) -> Result<bool, E>  {
+    let flag_set = 0 != self.check_and_clear_bits(
+      REG_STATUS, RegStatusBits::PowerOnResetFlagBit as u8)?;
+    Ok(flag_set)
+  }
+
+  /// Check whether an external event has been detected
+  /// (an appropriate input signal on the EVI pin)
+  pub fn check_and_clear_ext_event(&mut self)-> Result<bool, E>  {
+    let flag_set = 0 != self.check_and_clear_bits(
+      REG_STATUS, RegStatusBits::EventFlagBit as u8)?;
+    Ok(flag_set)
+  }
 
   // TODO these methods have not been thoroughly tested, and are believed broken.
   // fn is_eeprom_busy(&mut self) -> Result<bool, E> {
@@ -295,14 +378,14 @@ impl<I2C, E> RV3028<I2C>
   //   res
   // }
 
-  // set specific bits in a register:
-  // all bits must be high that you wish to set
-  fn set_reg_bits(&mut self, reg: u8, bits: u8) -> Result<(), E> {
-    self.select_mux_channel()?;
-    self.set_reg_bits_raw(reg, bits)
-  }
+  // // set specific bits in a register:
+  // // all bits must be high that you wish to set
+  // fn set_reg_bits(&mut self, reg: u8, bits: u8) -> Result<(), E> {
+  //   self.select_mux_channel()?;
+  //   self.set_reg_bits_raw(reg, bits)
+  // }
 
-  // set specific bits in a register: skips the mux
+  // Set specific bits in a register: "raw" means it skips the mux
   // all bits must be high that you wish to set
   fn set_reg_bits_raw(&mut self, reg: u8, bits: u8) -> Result<(), E> {
     let mut reg_val = self.read_register_raw(reg)?;
@@ -312,13 +395,13 @@ impl<I2C, E> RV3028<I2C>
 
   // clear specific bits in a register:
   // all bits must be high that you wish to be cleared
-  fn clear_reg_bits(&mut self, reg: u8, bits: u8) -> Result<(), E> {
-    self.select_mux_channel()?;
-    self.clear_reg_bits_raw(reg,bits)
-  }
+  // fn clear_reg_bits(&mut self, reg: u8, bits: u8) -> Result<(), E> {
+  //   self.select_mux_channel()?;
+  //   self.clear_reg_bits_raw(reg,bits)
+  // }
 
-  // clear specific bits in a register, skips the mux
-  // all bits must be high that you wish to be cleared
+  // Clears specific bits in a register, skips the mux.
+  // All bits must be high that you wish to be cleared
   fn clear_reg_bits_raw(&mut self, reg: u8, bits: u8) -> Result<(), E> {
     let mut reg_val = self.read_register_raw(reg)?;
     reg_val &= !(bits); // Clear  bits that are high
@@ -335,18 +418,22 @@ impl<I2C, E> RV3028<I2C>
     self.select_mux_channel()?;
 
     // First disable charging before changing settings
-    self.clear_reg_bits_raw(EEPROM_MIRROR_ADDRESS,  TRICKLE_CHARGE_ENABLE_BIT)?;
+    self.clear_reg_bits_raw(
+      EEPROM_MIRROR_ADDRESS,  RegEepromMirrorBits::TrickleChargeEnableBit as u8)?;
     // Reset TCR to 3 kΩ, the factory default, by clearing the TCR bits
-    self.clear_reg_bits_raw(EEPROM_MIRROR_ADDRESS,  TRICKLE_CHARGE_RESISTANCE_BITS )?;
+    self.clear_reg_bits_raw(
+      EEPROM_MIRROR_ADDRESS,  RegEepromMirrorBits::TrickleChargeResistanceBits as u8 )?;
 
     if enable {
-      self.set_reg_bits_raw(EEPROM_MIRROR_ADDRESS, limit_resistance as u8)?;
-      self.set_reg_bits_raw(EEPROM_MIRROR_ADDRESS, TRICKLE_CHARGE_ENABLE_BIT)?;
+      self.set_reg_bits_raw(EEPROM_MIRROR_ADDRESS, limit_resistance as u8)?; //TODO
+      self.set_reg_bits_raw(
+        EEPROM_MIRROR_ADDRESS, RegEepromMirrorBits::TrickleChargeEnableBit as u8)?;
     }
 
     // confirm the value set
     let conf_val =
-      0 != self.read_register_raw(EEPROM_MIRROR_ADDRESS)? & TRICKLE_CHARGE_ENABLE_BIT;
+      0 != self.read_register_raw(EEPROM_MIRROR_ADDRESS)?
+        & RegEepromMirrorBits::TrickleChargeEnableBit as u8;
     Ok(conf_val)
   }
 
@@ -356,11 +443,24 @@ impl<I2C, E> RV3028<I2C>
   /// Returns the set value
   pub fn toggle_backup_switchover(&mut self, enable: bool) -> Result<bool, E> {
     self.select_mux_channel()?;
-    self.set_or_clear_reg_bits_raw( EEPROM_MIRROR_ADDRESS, BACKUP_SWITCHOVER_DSM, enable)?;
+    self.set_or_clear_reg_bits_raw(
+      EEPROM_MIRROR_ADDRESS, RegEepromMirrorBits::BackupSwitchoverDsm as u8, enable)?;
     let conf_val =
-      0 != self.read_register_raw(EEPROM_MIRROR_ADDRESS)? & BACKUP_SWITCHOVER_DSM;
+      0 != self.read_register_raw(
+        EEPROM_MIRROR_ADDRESS)? & RegEepromMirrorBits::BackupSwitchoverDsm as u8;
     Ok(conf_val)
   }
+
+  /// Disable all clock outputs triggered by interrupts
+  pub fn clear_all_int_clockout_bits(&mut self) -> Result<(), E> {
+    self.select_mux_channel()?;
+    self.clear_reg_bits_raw(REG_CLOCK_INTERRUPT_MASK,
+                            RegClockIntMaskBits::ClockoutOnExtEvtBit as u8 |
+                              RegClockIntMaskBits::ClockoutOnAlarmBit as u8 |
+                            RegClockIntMaskBits::ClockoutOnPctBit as u8 |
+                              RegClockIntMaskBits::ClockoutOnUpdateBit as u8)
+  }
+
 
   /// Get the current value of the EEPROM mirror from RAM
   pub fn get_eeprom_mirror_value(&mut self) -> Result<u8, E> {
@@ -484,12 +584,18 @@ impl<I2C, E> RV3028<I2C>
 
   /// Toggle whether EVI events trigger on high/rising or low/falling edges
   pub fn toggle_event_high_low(&mut self, high: bool) -> Result<(), E> {
-    self.set_or_clear_reg_bits(REG_EVENT_CONTROL, EVENT_HIGH_LOW_BIT, high)
+    self.set_or_clear_reg_bits(REG_EVENT_CONTROL, RegEventControlBits::EventHighLowBit as u8, high)
   }
 
-  /// Toggle whether an alarm outputs an interrupt signal on the INT pin
-  pub fn toggle_alarm_interrupt_out(&mut self, enable: bool) -> Result<(), E> {
-    self.set_or_clear_reg_bits(REG_CONTROL2, ALARM_INT_ENABLE_BIT, enable)
+  /// Enable INT pin output when alarm occurs
+  pub fn toggle_alarm_int_enable(&mut self, enable: bool) -> Result<(), E> {
+    self.set_or_clear_reg_bits(REG_CONTROL2, RegControl2Bits::AlarmIntEnableBit as u8, enable)
+  }
+
+  /// Toggle whether the RTC outputs a pulse (active low) on INT pin,
+  /// when the countdown timer expires.
+  pub fn toggle_countdown_int_enable(&mut self, enable: bool) -> Result<(), E> {
+    self.set_or_clear_reg_bits(REG_CONTROL2, RegControl2Bits::TimerIntEnableBit as u8, enable)
   }
 
   /// Toggle whether interrupt signal is generated on the INT pin:
@@ -497,20 +603,84 @@ impl<I2C, E> RV3028<I2C>
   /// - or when an Automatic Backup Switchover occurs and TSS = 1.
   /// The signal on the INT pin is retained until the EVF flag is cleared
   /// to 0 (no automatic cancellation)
-  pub fn toggle_event_interrupt_out(&mut self, enable: bool) -> Result<(), E> {
-    self.set_or_clear_reg_bits(REG_CONTROL2, EVENT_INT_ENABLE_BIT, enable)
+  pub fn toggle_ext_event_int_enable(&mut self, enable: bool) -> Result<(), E> {
+    self.set_or_clear_reg_bits(REG_CONTROL2, RegControl2Bits::EventIntEnableBit as u8, enable)
   }
+
+  /// Toggles whether an interrupt signal is generated on the INT pin:
+  /// - when the time updates at either 1 second or 1 minute intervals
+  pub fn toggle_time_up_int_enable(&mut self, enable: bool) -> Result<(), E> {
+    self.set_or_clear_reg_bits(REG_CONTROL2, RegControl2Bits::TimeUpdateIntEnableBit as u8, enable)
+  }
+
+  /// Disable all INT pin output selector bits in RAM, excludes PORIE
+  pub fn clear_all_int_out_bits(&mut self) -> Result<(), E> {
+    self.select_mux_channel()?;
+    // UIE, TIE, AIE,  EIE
+    self.clear_reg_bits_raw(REG_CONTROL2,
+                        RegControl2Bits::TimeUpdateIntEnableBit as u8 |
+                          RegControl2Bits::TimerIntEnableBit as u8 |
+                          RegControl2Bits::AlarmIntEnableBit as u8 |
+                          RegControl2Bits::EventIntEnableBit as u8  )?;
+    // BSIE
+    self.clear_reg_bits_raw(
+      EEPROM_MIRROR_ADDRESS, RegEepromMirrorBits::BackupSwitchIntEnableBit as u8)?;
+
+    // PORIE -- must be set in EEPROM -- don't bother to set?
+    Ok(())
+  }
+
+
+  /// Clear all of the status registers that indicate whether
+  /// various conditions have triggered
+  pub fn clear_all_status_flags(&mut self) -> Result<(), E> {
+    self.select_mux_channel()?;
+    self.clear_reg_bits_raw(REG_STATUS,
+                            RegStatusBits::ClockIntFlagBit  as u8 |
+                              RegStatusBits::BackupSwitchFlag  as u8 |
+                              RegStatusBits::TimeUpdateFlag  as u8 |
+                              RegStatusBits::PeriodicTimerFlag  as u8 |
+                              RegStatusBits::AlarmFlagBit  as u8 |
+                              RegStatusBits::EventFlagBit  as u8 |
+                              RegStatusBits::PowerOnResetFlagBit as u8
+    )
+
+  }
+
+  /// - `int_enable` enables INT output on the periodic time updates
+  pub fn configure_periodic_time_update(&mut self, minutes: bool, int_enable: bool) -> Result<(), E> {
+    self.select_mux_channel()?;
+
+    // 1. Initialize bits UIE and UF to 0.
+    // 2. Choose the timer source clock and write the corresponding value in the USEL bit.
+    // 3. Set the UIE bit to 1 if you want to get a hardware interrupt on INT̅ ̅ ̅ ̅ ̅
+    // pin.
+    // 4. Set CUIE bit to 1 to enable clock output when a time update interrupt occurs. See also CLOCK OUTPUT
+    // SCHEME.
+    // 5. The first interrupt will occur after the next event, either second or minute change.
+
+    // UIE clear
+    self.clear_reg_bits_raw(
+      REG_CONTROL2, RegControl2Bits::TimeUpdateIntEnableBit as u8)?;
+    // UF clear
+    self.clear_reg_bits_raw(REG_STATUS, RegStatusBits::TimeUpdateFlag as u8)?;
+    // USEL set/clear
+    self.set_or_clear_reg_bits_raw(
+      REG_CONTROL1, RegControl1Bits::UselBit as u8, minutes)?;
+    // UIE re-set
+    self.set_or_clear_reg_bits_raw(
+      REG_CONTROL2, RegControl2Bits::TimeUpdateIntEnableBit as u8, int_enable)?;
+
+    Ok(())
+  }
+
 
   /// Check the alarm status, and if it's triggered, clear it
   /// return bool indicating whether the alarm triggered
   pub fn check_and_clear_alarm(&mut self) -> Result<bool, E> {
     // Check if the AF flag is set
-    let alarm_flag_set = 0 != self.check_and_clear_bits(REG_STATUS, ALARM_FLAG_BIT)?;
-    // let reg_val = self.read_register(REG_STATUS)?;
-    // let alarm_flag_set =  0 != (reg_val & ALARM_FLAG_BIT); // Check if the AF flag is set
-    // if alarm_flag_set {
-    //   self.clear_reg_bits(REG_STATUS, ALARM_FLAG_BIT)?;
-    // }
+    let alarm_flag_set = 0 != self.check_and_clear_bits(
+      REG_STATUS, RegStatusBits::AlarmFlagBit as u8)?;
     Ok(alarm_flag_set)
   }
 
@@ -525,8 +695,8 @@ impl<I2C, E> RV3028<I2C>
                    weekday: Option<Weekday>, match_day: bool, match_hour: bool, match_minute: bool) -> Result<(), E> {
 
     self.select_mux_channel()?;
-    // Initialize AF to 0; AIE/ALARM_INT_ENABLE_BIT is managed independently
-    self.clear_reg_bits_raw(REG_STATUS, ALARM_FLAG_BIT)?;
+    // Initialize AF to 0; AIE/AlarmIntEnableBit is managed independently
+    self.clear_reg_bits_raw(REG_STATUS, RegStatusBits::AlarmFlagBit as u8)?;
 
     // Procedure suggested by App Notes:
     // 1. Initialize bits AIE and AF to 0.
@@ -537,7 +707,8 @@ impl<I2C, E> RV3028<I2C>
     // See the following table.
 
     // Clear WADA for weekday alarm, or set for date alarm
-    self.set_or_clear_reg_bits_raw(REG_CONTROL1, WADA_BIT, !weekday.is_some())?;
+    self.set_or_clear_reg_bits_raw(
+      REG_CONTROL1, RegControl1Bits::WadaBit as u8, !weekday.is_some())?;
 
     let bcd_minute = Self::bin_to_bcd(datetime.time().minute() as u8);
     self.write_register_raw(REG_MINUTES_ALARM,
@@ -564,11 +735,14 @@ impl<I2C, E> RV3028<I2C>
     }
 
     // Clear AF again in case the above setting process immediately triggered the alarm
-    self.clear_reg_bits_raw(REG_STATUS, ALARM_FLAG_BIT)?;
+    self.clear_reg_bits_raw(REG_STATUS, RegStatusBits::AlarmFlagBit as u8)?;
 
     Ok(())
   }
 
+  /// Read the alarm settings
+  /// Matches are flag settings for whether the alarm should match day, hour, minute
+  ///
   pub fn get_alarm_datetime_wday_matches(&mut self)
     -> Result<(NaiveDateTime, Option<Weekday>, bool, bool, bool), E> {
 
@@ -588,7 +762,7 @@ impl<I2C, E> RV3028<I2C>
 
     let mut weekday = None;
 
-    let wada_state = self.read_register_raw(REG_CONTROL1)? & WADA_BIT;
+    let wada_state = self.read_register_raw(REG_CONTROL1)? & RegControl1Bits::WadaBit as u8;
 
     let dt =
       if 0 == wada_state {
@@ -607,10 +781,7 @@ impl<I2C, E> RV3028<I2C>
     Ok((dt, weekday, match_day, match_hour, match_minutes))
   }
 
-  /// Enable INT pin output when alarm occurs
-  pub fn toggle_alarm_int_enable(&mut self, enable: bool) -> Result<(), E> {
-    self.set_or_clear_reg_bits(REG_CONTROL2, ALARM_INT_ENABLE_BIT, enable)
-  }
+
 
   // If `set` is true, set the high bits given in `bits`, otherwise clear those bits
   fn set_or_clear_reg_bits(&mut self, reg: u8, bits: u8, set: bool) -> Result<(), E> {
@@ -627,46 +798,39 @@ impl<I2C, E> RV3028<I2C>
     }
   }
 
-  /// Disable all INT pin output selector bits in RAM, excludes PORIE
-  pub fn clear_all_int_out_bits(&mut self) -> Result<(), E> {
-    // UIE, TIE, AIE,  EIE
-    self.clear_reg_bits(REG_CONTROL2,
-                        TIME_UPDATE_INT_ENABLE_BIT | TIMER_INT_ENABLE_BITL |
-                          ALARM_INT_ENABLE_BIT | EVENT_INT_ENABLE_BIT )?;
-    // BSIE
-    self.clear_reg_bits(EEPROM_MIRROR_ADDRESS, BACKUP_SWITCH_INT_ENABLE_BIT)?;
 
-    // PORIE -- must be set in EEPROM -- don't bother to set?
-    Ok(())
+  /// Enables or disables default CLKOUT behavior
+  pub fn toggle_plain_clockout(&mut self, enable: bool) -> Result<(), E> {
+    self.select_mux_channel()?;
+    // TODO self.clear_reg_bits_raw(REG_STATUS, RegStatusBits::ClockIntFlagBit as u8)?;
+    self.set_or_clear_reg_bits_raw(
+      EEPROM_MIRROR_ADDRESS, RegEepromMirrorBits::ClockoutOutputEnableBit as u8, enable)
   }
 
-  /// Enables or disables CLKOUT
-  pub fn toggle_clock_output(&mut self, enable: bool)  -> Result<(), E> {
+  /// Enables or disables interrupt-controlled CLKOUT
+  pub fn toggle_int_clockout(&mut self, enable: bool)  -> Result<(), E> {
     self.select_mux_channel()?;
-    self.clear_reg_bits_raw(REG_STATUS, CLOCK_INT_FLAG_BIT)?;
-    self.set_or_clear_reg_bits_raw(EEPROM_MIRROR_ADDRESS, CLOCK_OUT_ENABLE_BIT, enable)
+    self.set_or_clear_reg_bits_raw(
+    REG_CONTROL2,  RegControl2Bits::ClockoutIntEnableBit as u8, enable)
   }
 
   // Configure the Periodic Countdown Timer prior to the next countdown.
-  fn pct_prep(&mut self, value: u16, freq: TimerClockFreq,  repeat: bool ) -> Result<(), E> {
-    self.select_mux_channel()?;
-
+  fn config_pct_raw(&mut self, value: u16, freq: TimerClockFreq, repeat: bool ) -> Result<(), E> {
     let value_high: u8 = ((value >> 8) as u8) & 0x0F;
     let value_low: u8 = (value & 0xFF) as u8;
 
-
     // configure the timer clock source / period
-    self.clear_reg_bits_raw(REG_CONTROL1, TIMER_ENABLE_BIT)?;
-    self.set_or_clear_reg_bits_raw(REG_CONTROL1, TIMER_REPEAT_BIT, repeat)?;
+    self.clear_reg_bits_raw(REG_CONTROL1, RegControl1Bits::TimerEnableBit as u8)?;
+    self.set_or_clear_reg_bits_raw(REG_CONTROL1, RegControl1Bits::TimerRepeatBit as u8, repeat)?;
 
-    self.clear_reg_bits_raw(REG_CONTROL1, TIMER_CLOCK_FREQ_BITS)?;
-    self.set_reg_bits_raw(REG_CONTROL1, freq as u8)?;
+    self.clear_reg_bits_raw(REG_CONTROL1, RegControl1Bits::TimerClockFreqBits as u8)?;
+    self.set_reg_bits_raw(REG_CONTROL1, freq as u8)?; //TODO verify
 
     // write to REG_TIMER_VALUE0 and REG_TIMER_VALUE1
     let write_buf = [ REG_TIMER_VALUE0, value_low, value_high];
     self.i2c.write(RV3028_ADDRESS, &write_buf)?;
 
-    self.clear_reg_bits_raw(REG_STATUS, PERIODIC_TIMER_FLAG)?;
+    self.clear_reg_bits_raw(REG_STATUS, RegStatusBits::PeriodicTimerFlag as u8)?;
     Ok(())
   }
 
@@ -718,37 +882,39 @@ impl<I2C, E> RV3028<I2C>
   }
 
   /// Prepare the Periodic Countdown Timer for a countdown,
-  /// but don't start it counting down yet.
+  /// and optionally start the countdown.
   ///
   /// - `repeat`: If true, the countdown timer will repeat as a periodic timer.
   /// If false, the countdown timer will only run once ("one-shot" mode).
   /// Returns the estimated actual duration (which may vary from the requested duration
   /// dur to discrete RTC clock ticks).
-  pub fn setup_countdown_timer(&mut self, duration: &Duration,
-                               repeat: bool
-  )  -> Result<Duration, E> {
+  /// - `start`: If true, start the countdown
+  pub fn config_countdown_timer(&mut self, duration: &Duration,
+                                repeat: bool, start: bool
+  ) -> Result<Duration, E> {
     let (ticks, freq, estimated) =
       Self::pct_ticks_and_rate_for_duration(duration);
-    self.pct_prep(ticks, freq, repeat)?;
+
+    self.select_mux_channel()?;
+    self.config_pct_raw(ticks, freq, repeat)?;
+    if start {
+      self.set_reg_bits_raw(REG_CONTROL1, RegControl1Bits::TimerEnableBit as u8)?;
+    }
+
     Ok(estimated)
   }
 
   /// Set whether the Periodic Countdown Timer mode is repeating (periodic) or one-shot.
   /// - `enable`: If true, starts the timer countdown. If false, stops the timer.
   pub fn toggle_countdown_timer(&mut self, enable: bool)  -> Result<(), E> {
-    self.set_or_clear_reg_bits(REG_CONTROL1, TIMER_ENABLE_BIT, enable)
+    self.set_or_clear_reg_bits(
+      REG_CONTROL1, RegControl1Bits::TimerEnableBit as u8, enable)
   }
-
-  // /// Check whether the Periodic Countdown Timer has finished
-  // pub fn check_countdown_finished(&mut self) -> Result<bool, E> {
-  //   let reg_val = self.read_register(REG_STATUS)?;
-  //   let flag_set =  0 != (reg_val & PERIODIC_TIMER_FLAG); // Check if the TF flag is set
-  //   Ok(flag_set)
-  // }
 
   /// Check whether countdown timer has finished counting down, and clear it
   pub fn check_and_clear_countdown(&mut self) -> Result<bool, E> {
-    let flag_set = 0 != self.check_and_clear_bits(REG_STATUS, PERIODIC_TIMER_FLAG)?;
+    let flag_set = 0 != self.check_and_clear_bits(
+      REG_STATUS, RegStatusBits::PeriodicTimerFlag as u8)?;
     Ok(flag_set)
   }
 
@@ -773,6 +939,56 @@ impl<I2C, E> RV3028<I2C>
     Ok(bits_val)
   }
 
+
+  /// Configure event detection on the EVI pin
+  /// - `rising` whether edge detection is on rising edge / high level
+  /// - `int_enable` whether events detected on EVI pin should generate an interrupt on INT pin
+  /// - `filtering` 00..11 time filtering
+  pub fn config_ext_event_detection(
+    &mut self, rising: bool, int_enable: bool, filtering: u8, clockout_enable: bool) -> Result<(), E>
+  {
+    self.select_mux_channel()?;
+
+    // 1. Initialize bits TSE and EIE to 0.
+    // 2. Clear flag EVF to 0.
+    // 4. Set EHL bit to 1 or 0 to choose high or low level (or rising or falling edge) detection on pin EVI.
+    // 5. Select EDGE DETECTION (ET = 00) or LEVEL DETECTION WITH FILTERING (ET ≠ 00).
+    // 8. Set CEIE bit to 1 to enable clock output when external event occurs. See also CLOCK OUTPUT SCHEME.
+    // 10. Set EIE bit to 1 if you want to get a hardware interrupt on INT̅ ̅ ̅ ̅ ̅
+    // pin.
+
+    // Pause listening for external events on EVI pin
+    // 1. Initialize EIE to 0.
+    self.clear_reg_bits_raw(REG_CONTROL2,
+                              RegControl2Bits::EventIntEnableBit  as u8)?;
+    // 2. Clear flag EVF to 0.
+    self.clear_reg_bits_raw(
+      REG_STATUS, RegStatusBits::EventFlagBit as u8)?;
+
+    // 4. Set EHL bit to 1 or 0 to choose high or low level
+    // (or rising or falling edge) detection on pin EVI.
+    self.set_or_clear_reg_bits_raw(
+      REG_EVENT_CONTROL, RegEventControlBits::EventHighLowBit as u8, rising)?;
+
+    // 5. Select EDGE DETECTION (ET = 00) or LEVEL DETECTION WITH FILTERING (ET ≠ 00).
+    self.clear_reg_bits_raw(REG_EVENT_CONTROL,RegEventControlBits::EventFilteringTimeBits as u8)?;
+    if 0 != filtering {
+      // TODO verify this sets the correct filtering
+      self.set_reg_bits_raw(REG_EVENT_CONTROL, filtering << 4)?;
+    }
+
+    // 8. Set CEIE bit to 1 to enable clock output when external event occurs.
+    // See also CLOCK OUTPUT SCHEME.
+    self.set_or_clear_reg_bits_raw(
+      REG_CLOCK_INTERRUPT_MASK, RegClockIntMaskBits::ClockoutOnExtEvtBit as u8, clockout_enable)?;
+
+    // 10. Set EIE bit to 1 if you want to get a hardware interrupt on INT pin
+    self.set_or_clear_reg_bits_raw(
+      REG_CONTROL2, RegControl2Bits::EventIntEnableBit as u8, int_enable)?;
+
+    Ok(())
+  }
+
 }
 
 
@@ -782,7 +998,18 @@ pub trait EventTimeStampLogger {
 
   /// Enable or disable the Time Stamp Function for event logging
   /// This logs external interrupts or other events
-  fn toggle_event_log(&mut self, enable: bool) -> Result<(), Self::Error>;
+  fn toggle_timestamp_logging(&mut self, enable: bool) -> Result<(), Self::Error>;
+
+  /// clear out any existing logged event timestamps
+  fn reset_timestamp_log(&mut self) -> Result<(), Self::Error>;
+
+  /// Setup time stamp logging for events
+  /// - `evt_source` source for timestamp events, eg TS_EVENT_SOURCE_BSF
+  /// - `overwrite` Save the most recent event timestamp?
+  /// - `start` Should event timestamp logging immediately start?
+  fn config_timestamp_logging(
+    &mut self, evt_source: u8, overwrite: bool,   start: bool)
+    -> Result<(), Self::Error>;
 
   /// Get event count -- the number of events that have been logged since enabling logging
   /// Returns the count of events since last reset, and the datetime of one event
@@ -794,7 +1021,7 @@ pub trait EventTimeStampLogger {
   fn toggle_time_stamp_overwrite(&mut self, enable: bool) -> Result<(), Self::Error>;
 
   /// Select a source for events to be logged, device-specific
-  fn set_event_source(&mut self, source: u8) -> Result<(), Self::Error>;
+  fn set_event_timestamp_source(&mut self, source: u8) -> Result<(), Self::Error>;
 }
 
 impl<I2C, E> DateTimeAccess for  RV3028<I2C>
@@ -840,33 +1067,62 @@ impl<I2C, E> EventTimeStampLogger for  RV3028<I2C>
 {
   type Error = E;
 
-  fn toggle_event_log(&mut self, enable: bool) -> Result<(), Self::Error> {
-    if enable {
-      // App notes recommend first disabling the event log with TSE and setting TSR
-      // 1. Initialize bits TSE and EIE to 0.
-      // 2. Select TSOW (0 or 1), clear EVF and BSF.
-      // 3. Write 1 to TSR bit, to reset all Time Stamp registers to 00h. Bit TSR always returns 0 when read.
-      // 4. Select the External Event Interrupt function (TSS = 0) or the Automatic Backup Switchover Interrupt
-      // function (TSS = 1) as time stamp source and initialize the appropriate function
-      // (see EXTERNAL EVENT INTERRUPT FUNCTION or AUTOMATIC BACKUP SWITCHOVER INTERRUPT FUNCTION).
-      // 5. Set the TSE bit to 1 to enable the Time Stamp function.
 
-      // Initialize bits TSE and EIE to 0.
-      self.clear_reg_bits(REG_CONTROL2, TIME_STAMP_ENABLE_BIT)?;
-      // Assume that TSOW has already been selected
-      // Clear the single event detect flag EVF and BSF
-      self.clear_reg_bits(REG_STATUS, EVENT_FLAG_BIT)?;
-      self.clear_reg_bits(REG_STATUS, BACKUP_SWITCH_FLAG)?;
-      // Reset all Time Stamp registers to zero
-      self.set_reg_bits(REG_EVENT_CONTROL, TIME_STAMP_RESET_BIT)?;
+  fn toggle_timestamp_logging(&mut self, enable: bool) -> Result<(), Self::Error> {
+    self.select_mux_channel()?;
+    self.set_or_clear_reg_bits_raw(REG_CONTROL2, RegControl2Bits::TimeStampEnableBit as u8, enable)
+  }
 
-      // start listening for events
-      self.set_reg_bits(REG_CONTROL2, TIME_STAMP_ENABLE_BIT)
-    }
-    else {
-      // stop listening for events
-      self.clear_reg_bits(REG_CONTROL2, TIME_STAMP_ENABLE_BIT)
-    }
+  fn reset_timestamp_log(&mut self) -> Result<(), Self::Error> {
+    self.select_mux_channel()?;
+    self.set_reg_bits_raw(
+      REG_EVENT_CONTROL, RegEventControlBits::TimeStampResetBit as u8)
+
+  }
+
+  fn config_timestamp_logging(
+    &mut self, evt_source: u8, overwrite: bool,  start:bool) -> Result<(), E>
+  {
+    self.select_mux_channel()?;
+
+    // Pause listening for events
+    // 1. Initialize bits TSE to 0.
+    self.clear_reg_bits_raw(REG_CONTROL2,
+                            RegControl2Bits::TimeStampEnableBit as u8)?;
+
+    // 2. Clear EVF and BSF
+    self.clear_reg_bits_raw(
+      REG_STATUS, RegStatusBits::EventFlagBit as u8 | RegStatusBits::BackupSwitchFlag as u8)?;
+
+    // 3. Set TSS bit to
+    // External Event Interrupt function (TSS = 0) or the
+    // Automatic Backup Switchover Interrupt function (TSS = 1)
+    // as time stamp source and initialize the appropriate function
+    let enable_bsf = evt_source == TS_EVENT_SOURCE_BSF;
+    self.set_or_clear_reg_bits_raw(
+      REG_EVENT_CONTROL, RegEventControlBits::TimeStampSourceBit as u8, enable_bsf)?;
+
+    // 6. Set TSOW bit to 1 if the last occurred event has to be recorded and TS registers are overwritten.
+    self.set_or_clear_reg_bits_raw(
+      REG_EVENT_CONTROL, RegEventControlBits::TimeStampOverwriteBit as u8, overwrite)?;
+
+    // 7. Write 1 to TSR bit, to clear all Time Stamp registers to 0x00
+    self.set_reg_bits_raw(
+      REG_EVENT_CONTROL, RegEventControlBits::TimeStampResetBit as u8)?;
+
+    // 9. Set TSE bit to 1 if you want to enable the Time Stamp function.
+    // see also: toggle_timestamp_logging
+    self.set_or_clear_reg_bits_raw(
+      REG_CONTROL2, RegControl2Bits::TimeStampEnableBit as u8, start)?;
+
+    // 1. Initialize bits TSE and EIE to 0.
+    // 2. Clear flag EVF and BSF to 0.
+    // 3. Set TSS bit to 0 to select External Event on EVI pin as Time Stamp and Interrupt source.
+    // 6. Set TSOW bit to 1 to record the last occurred event (and TS registers are overwritten).
+    // 7. Write 1 to TSR bit, to reset all Time Stamp registers to 00h. Bit TSR always returns 0 when read.
+    // 9. Set TSE bit to 1 if you want to enable the Time Stamp function.
+    // pin.
+    Ok(())
   }
 
   fn get_event_count_and_datetime(&mut self) -> Result<(u32, Option<NaiveDateTime>), Self::Error> {
@@ -895,16 +1151,18 @@ impl<I2C, E> EventTimeStampLogger for  RV3028<I2C>
       }
     };
 
-    Ok((count.into(), odt))
+    Ok((count as u32, odt))
   }
 
   fn toggle_time_stamp_overwrite(&mut self, enable: bool) -> Result<(), Self::Error> {
-    self.set_or_clear_reg_bits(REG_EVENT_CONTROL, TIME_STAMP_OVERWRITE_BIT, enable)
+    self.set_or_clear_reg_bits(
+      REG_EVENT_CONTROL, RegEventControlBits::TimeStampOverwriteBit as u8, enable)
   }
 
-  fn set_event_source(&mut self, source: u8) -> Result<(), Self::Error> {
-    self.set_or_clear_reg_bits(REG_EVENT_CONTROL, TIME_STAMP_SOURCE_BIT,
-                               TS_EVENT_SOURCE_EVI != source)
+  fn set_event_timestamp_source(&mut self, source: u8) -> Result<(), Self::Error> {
+    let enable = TS_EVENT_SOURCE_BSF == source;
+    self.set_or_clear_reg_bits(
+      REG_EVENT_CONTROL, RegEventControlBits::TimeStampSourceBit as u8, enable)
   }
 
 }

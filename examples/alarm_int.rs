@@ -18,7 +18,7 @@ use gpiocdev::{ line::{EdgeDetection} };
 /// using `sudo raspi-config`
 /// and connecting:
 /// - SDA, SCL, GND, and 3.3V pins from rpi to the RTC
-/// - GPIO 27 (physical pin 13) from rpi to the INT pin of the RTC
+/// - GPIO 17 from rpi to the INT pin of the RTC
 
 fn get_sys_timestamp() -> (NaiveDateTime, u32) {
     let now = Utc::now();
@@ -70,7 +70,7 @@ fn verify_alarm_set<I2C,E>(rtc: &mut RV3028<I2C>, alarm_dt: &NaiveDateTime,
 
 }
 
-fn dump_edge_events(gpio_int_req: &gpiocdev::Request) {
+fn dump_gpio_events(gpio_int_req: &gpiocdev::Request) {
     //    for edge_event in gpio_int_req.edge_events()
     while Ok(true) == gpio_int_req.has_edge_event() {
         if let Ok(inner_evt) = gpio_int_req.read_edge_event() {
@@ -80,8 +80,8 @@ fn dump_edge_events(gpio_int_req: &gpiocdev::Request) {
 }
 
 const MUX_I2C_ADDRESS: u8 = 0x70;
-const MUX_CHAN_FIRST:u8 = 0b0000_0001 ; //channel 0, LSB
-const MUX_CHAN_SECOND:u8 = 0b1000_0000 ; // channel 7, MSB
+const MUX_CHAN_ZERO:u8 = 0b0000_0001 ; //channel 0, LSB
+// const MUX_CHAN_SEVEN:u8 = 0b1000_0000 ; // channel 7, MSB
 
 
 fn main() {
@@ -90,8 +90,9 @@ fn main() {
     let i2c = I2cdev::new("/dev/i2c-1").expect("Failed to open I2C device");
     // Create a new instance of the RV3028 driver
     // let mut rtc = RV3028::new(i2c);
+    // alternate: connect via MUX
     let mut rtc =
-      RV3028::new_with_mux(i2c, MUX_I2C_ADDRESS, MUX_CHAN_FIRST);
+      RV3028::new_with_mux(i2c, MUX_I2C_ADDRESS, MUX_CHAN_ZERO);
 
     let (sys_datetime, sys_unix_timestamp) = get_sys_timestamp();
     // use the set_datetime method to ensure all the timekeeping registers on
@@ -141,8 +142,7 @@ fn main() {
     let gpio_int_req = gpiocdev::Request::builder()
       .on_chip("/dev/gpiochip0")
       .with_line(17)
-      //.with_line(27)
-      // this pin is "active" when it is low, because we've attached a pull-up resistor of 2.2k
+      // this pin is "active" when it is low, because we've attached a pull-up resistor of 2.2..10k
       .as_active_low()
       // PullUp bias doesn't appear to work on Rpi3
       // .with_bias(Bias::PullUp) // INT pulls down briefly when triggered
@@ -151,39 +151,42 @@ fn main() {
       // .with_debounce_period(Duration::from_micros(1))
       .request().unwrap();
 
+    dump_gpio_events(&gpio_int_req);
+    rtc.toggle_alarm_int_enable(true).unwrap();
     verify_alarm_set(&mut rtc, &alarm_dt, None,
                      false, false, true);
 
-    if let Ok(true) = gpio_int_req.has_edge_event() {
-        println!("dump stale edge events");
-        dump_edge_events(&gpio_int_req);
-    }
-
     let cur_dt = rtc.datetime().unwrap();
-    rtc.toggle_alarm_int_enable(true).unwrap();
     println!("wait for alarm to trigger..\r\n{} -> {}",cur_dt, alarm_dt);
 
     for _i in 0..20 {
-        if let Ok(true) = gpio_int_req.wait_edge_event(Duration::from_secs(5)) {
-            let cur_dt = rtc.datetime().unwrap();
-            println!("Edge events at {}",cur_dt);
-            dump_edge_events(&gpio_int_req);
+        if let Ok(true) = gpio_int_req.wait_edge_event(Duration::from_secs(10)) {
+            let cur_dt = Utc::now().naive_utc();
+            println!(" {} gpio events:",cur_dt);
+            dump_gpio_events(&gpio_int_req);
+            let alarm_af = rtc.check_and_clear_alarm().unwrap();
+            println!("{} alarm_af: {}", cur_dt, alarm_af);
+            println!("break on gpio_events");
+            break;
         }
         else {
-            let cur_dt = rtc.datetime().unwrap();
-            println!("No edge events at {}",cur_dt);
+            let cur_dt = Utc::now().naive_utc();
+            println!("{} No gpio events",cur_dt);
         }
 
+        // there's a bit of a race condition where the alarm flag can switch high
+        // after we've already checked for gpio events
         let alarm_af = rtc.check_and_clear_alarm().unwrap();
-        println!("{} alarm flag: {}", cur_dt, alarm_af);
-        if alarm_af {
-            // If we saw edge events, this should also be true
+        if alarm_af  {
+            let cur_dt = Utc::now().naive_utc();
+            println!("{} alarm flag: {}", cur_dt, alarm_af);
+            dump_gpio_events(&gpio_int_req);
             println!("break on alarm_af true");
             break;
         }
 
-        if cur_dt.minute() >= alarm_dt.minute() {
-            println!("break on minute expired");
+        if cur_dt.minute() > alarm_dt.minute() {
+            println!("{} break on minute expired", cur_dt);
             break;
         }
     }

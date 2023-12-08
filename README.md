@@ -21,7 +21,7 @@ from the linux command line.
 ### Single RTC examples
 These examples all assume there is a single RTC connected directly to a raspberry pi-like linux host.
 - [`rpil`](./examples/rpil.rs) demonstrates some basic interactions with the RTC attached to eg a Raspberry Pi host.
-- [`event_log`](./examples/event_log.rs) shows how to configure and enable event logging (for example, 
+- [`event_log`](./examples/ext_evt.rs) shows how to configure and enable event logging (for example, 
 detecting interrupt signals on the EVI pin)
 - [`alarm_int`](./examples/alarm_int.rs) shows how to set and get the alarm, and check for alarm trigger
 - [`trickle`](./examples/trickle.rs) shows how to enable and disable trickle charging, as well as enable
