@@ -37,19 +37,16 @@ fn send_rising_gpio_pulses(num_pulses: u32, out_pin: u32, active: Duration, inac
     .request().unwrap();
 
   println!("rising...");
-  std::thread::sleep(Duration::seconds(1).to_std().unwrap());
+  std::thread::sleep(inactive.to_std().unwrap());
 
   for _i in 0..num_pulses {
-    //initially inactive
-    let _ = gpio_req.set_value(out_pin, Value::Inactive);
-    std::thread::sleep(inactive.to_std().unwrap());
     let _ = gpio_req.set_value(out_pin, Value::Active);
     std::thread::sleep(active.to_std().unwrap());
+    let _ = gpio_req.set_value(out_pin, Value::Inactive);
+    std::thread::sleep(inactive.to_std().unwrap());
   }
 
-  //reset to inactive after
   std::thread::sleep(Duration::seconds(2).to_std().unwrap());
-  let _ = gpio_req.set_value(out_pin, Value::Inactive);
 
 
 }
@@ -67,17 +64,17 @@ fn send_falling_gpio_pulses(num_pulses: u32, out_pin: u32,  active: Duration, in
     .request().unwrap();
 
   println!("falling...");
-  std::thread::sleep(Duration::seconds(1).to_std().unwrap());
+  std::thread::sleep(active.to_std().unwrap());
 
   for _i in 0..num_pulses {
-    let _ = gpio_req.set_value(out_pin, Value::Active);
-    std::thread::sleep(active.to_std().unwrap());
     let _ = gpio_req.set_value(out_pin, Value::Inactive);
     std::thread::sleep(inactive.to_std().unwrap());
+    let _ = gpio_req.set_value(out_pin, Value::Active);
+    std::thread::sleep(active.to_std().unwrap());
   }
 
   std::thread::sleep(Duration::seconds(2).to_std().unwrap());
-
+  // there may be an extra edge detected as gpio pin returns to idle
 }
 
 
@@ -116,13 +113,12 @@ fn main() {
 
   rtc.config_timestamp_logging(
     TS_EVENT_SOURCE_EVI, true, true).unwrap();
-  rtc.reset_timestamp_log().unwrap();
 
   // send a series of pulses on the host's GPIO output pin
-
   let level_bg_duration = Duration::milliseconds(1000);
   let pulse_duration = Duration::milliseconds(200);
 
+  rtc.reset_timestamp_log().unwrap();
   // Configure the RTC for falling external events on EVI pin
   rtc.config_ext_event_detection(
     false, false, 0b00, false).unwrap();
