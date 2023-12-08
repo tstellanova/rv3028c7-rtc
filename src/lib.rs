@@ -740,6 +740,9 @@ impl<I2C, E> RV3028<I2C>
     Ok(())
   }
 
+  /// Read the alarm settings
+  /// Matches are flag settings for whether the alarm should match day, hour, minute
+  ///
   pub fn get_alarm_datetime_wday_matches(&mut self)
     -> Result<(NaiveDateTime, Option<Weekday>, bool, bool, bool), E> {
 
@@ -907,13 +910,6 @@ impl<I2C, E> RV3028<I2C>
     self.set_or_clear_reg_bits(
       REG_CONTROL1, RegControl1Bits::TimerEnableBit as u8, enable)
   }
-
-  // /// Check whether the Periodic Countdown Timer has finished
-  // pub fn check_countdown_finished(&mut self) -> Result<bool, E> {
-  //   let reg_val = self.read_register(REG_STATUS)?;
-  //   let flag_set =  0 != (reg_val & PeriodicTimerFlag); // Check if the TF flag is set
-  //   Ok(flag_set)
-  // }
 
   /// Check whether countdown timer has finished counting down, and clear it
   pub fn check_and_clear_countdown(&mut self) -> Result<bool, E> {
