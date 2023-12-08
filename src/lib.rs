@@ -1,8 +1,7 @@
 #![cfg_attr(not(test), no_std)]
 
 
-pub use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike, Weekday};
-use chrono::{Duration, NaiveTime};
+pub use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Weekday};
 pub use rtcc::{  DateTimeAccess };
 
 use embedded_hal::blocking::i2c::{Write, Read, WriteRead};
