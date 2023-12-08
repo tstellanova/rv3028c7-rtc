@@ -17,12 +17,12 @@ const MUX_CHAN_SEVEN:u8 = 0b1000_0000 ; // channel 7, MSB
 const GPIO_OUT_PIN: u32 = 27;
 
 /// Example testing real RTC communications,
-/// assuming linux environment (such as Raspberry Pi 3+)
+/// assuming linux environment (such as Raspberry Pi 3 Model B+)
 /// with RV3028 attached to i2c1.
-/// The following was tested by enabling i2c-1 on a Raspberry Pi 3+
-/// using `sudo raspi-config`
-/// and connecting the SDA, SCL, GND, and 3.3V pins from RPi to the RTC
-/// and connecting a gpio output pin  from rpi to the EVI pin of the RTC
+/// The following was tested by enabling i2c-1 on a Raspberry Pi 3 Model B+
+/// using `sudo raspi-config`,
+/// - connecting the SDA, SCL, GND, and 3.3V pins from rpi to the RTC
+/// - connecting a gpio output pin from rpi to the EVI pin of the RTC
 
 
 fn send_rising_gpio_pulses(num_pulses: u32, out_pin: u32, active: Duration, inactive: Duration) {
@@ -114,19 +114,20 @@ fn main() {
   rtc.clear_all_int_clockout_bits().unwrap();
   rtc.clear_all_status_flags().unwrap();
 
-  // rtc.toggle_timestamp_logging(false).unwrap();
-  // rtc.reset_timestamp_log().unwrap();
-
   rtc.config_timestamp_logging(
     TS_EVENT_SOURCE_EVI, true, true).unwrap();
+  rtc.reset_timestamp_log().unwrap();
 
   // send a series of pulses on the host's GPIO output pin
+
+  let level_bg_duration = Duration::milliseconds(1000);
+  let pulse_duration = Duration::milliseconds(200);
 
   // Configure the RTC for falling external events on EVI pin
   rtc.config_ext_event_detection(
     false, false, 0b00, false).unwrap();
   send_falling_gpio_pulses( 3, GPIO_OUT_PIN,
-                            Duration::milliseconds(1000), Duration::milliseconds(100));
+                            level_bg_duration, pulse_duration);
   if rtc.check_and_clear_ext_event().unwrap() {
     println!("falling triggered");
     dump_events(&mut rtc);
@@ -137,8 +138,9 @@ fn main() {
   // Configure the RTC for rising external events on EVI pin
   rtc.config_ext_event_detection(
     true, false, 0b00, false).unwrap();
+  // rtc.make_the_thing(false).unwrap();
   send_rising_gpio_pulses(3, GPIO_OUT_PIN,
-                          Duration::milliseconds(100), Duration::milliseconds(1000));
+                          pulse_duration, level_bg_duration);
   if rtc.check_and_clear_ext_event().unwrap() {
     println!("rising triggered");
     dump_events(&mut rtc);
