@@ -25,5 +25,6 @@ chrono = {version = "0.4.31", default-features = false, features = ["alloc","clo
 linux-embedded-hal = "0.3.0"
 gpiocdev = "0.6.1"
 spin_sleep = "1.1.1"
+anyhow = "1.0.75"
 
 

@@ -2,9 +2,8 @@ extern crate rv3028c7_rtc;
 
 use linux_embedded_hal::I2cdev;
 use chrono::{Utc};
-use rv3028c7_rtc::{RV3028, Datelike, Duration, NaiveDateTime, Timelike};
+use rv3028c7_rtc::{RV3028, Datelike, DateTimeAccess, Duration, NaiveDateTime, Timelike};
 use std::thread::sleep;
-use rtcc::DateTimeAccess;
 
 /// Example testing real RTC communications,
 /// assuming linux environment (such as Raspberry Pi 3+)
