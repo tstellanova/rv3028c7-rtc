@@ -1,8 +1,9 @@
 extern crate rv3028c7_rtc;
 
 use linux_embedded_hal::I2cdev;
-use chrono::{Utc};
-use rv3028c7_rtc::{RV3028, Datelike, Duration, NaiveDateTime, Timelike};
+use chrono::{Datelike, NaiveDateTime, Timelike, Utc};
+use rv3028c7_rtc::{EventTimeStampLogger, RV3028, TS_EVENT_SOURCE_BSF};
+use std::time::Duration;
 use std::thread::sleep;
 use rtcc::DateTimeAccess;
 
@@ -53,11 +54,28 @@ fn main() {
     println!("rtc H:M:S {:02}:{:02}:{:02}",
              hours, minutes, seconds);
 
+    // enable switchover to backup power supply
+    rtc.clear_all_int_out_bits().unwrap();
+
+    if let Ok(backup_set) = rtc.toggle_backup_switchover(true) {
+        println!("backup_set:  {}", backup_set);
+    }
+    rtc.config_timestamp_logging(TS_EVENT_SOURCE_BSF, true, true).unwrap();
+
     // check the drift over and over again
     loop {
-        let dt = rtc.datetime().unwrap();
-        println!("sys {}\r\nrtc {}", Utc::now().naive_utc(), dt);
-        sleep(Duration::seconds(5).to_std().unwrap());
+        if let Ok(bsf) = rtc.check_and_clear_backup_event() {
+            let dt = rtc.datetime().unwrap();
+            println!("sys {}\r\nrtc {} bsf: {}", Utc::now().naive_utc(), dt, bsf);
+            if bsf {
+                let (evt_count, last_evt_odt) = rtc.get_event_count_and_datetime().unwrap();
+                if let Some(last_bsf_evt) = last_evt_odt {
+                    println!("backup switchovers: {} last: {}", evt_count, last_bsf_evt);
+                    rtc.reset_timestamp_log().unwrap();
+                }
+            }
+        }
+        sleep(Duration::from_secs(5));
     }
 
 
