@@ -42,17 +42,17 @@ fn main() {
     println!("start sys {}\r\nrtc1 {}\r\nrtc2 {}", sys_dt, dt1, dt2);
 
     // enable trickle charging on both
-    let one_enabled = rtc1.toggle_trickle_charge(
+    let one_enabled = rtc1.config_trickle_charge(
         true, TrickleChargeCurrentLimiter::Ohms15k).unwrap();
-    let two_enabled = rtc2.toggle_trickle_charge(
+    let two_enabled = rtc2.config_trickle_charge(
         true, TrickleChargeCurrentLimiter::Ohms15k).unwrap();
 
     println!("rtc1 enabled: {}\r\nrtc2 enabled: {}",one_enabled, two_enabled);
 
     // disable on both
-    let one_enabled = rtc1.toggle_trickle_charge(
+    let one_enabled = rtc1.config_trickle_charge(
         false, TrickleChargeCurrentLimiter::Ohms3k).unwrap();
-    let two_enabled = rtc2.toggle_trickle_charge(
+    let two_enabled = rtc2.config_trickle_charge(
         false, TrickleChargeCurrentLimiter::Ohms3k).unwrap();
     println!("rtc1 enabled: {}\r\nrtc2 enabled: {}",one_enabled, two_enabled);
 

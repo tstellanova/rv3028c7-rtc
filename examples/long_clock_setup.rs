@@ -2,13 +2,10 @@ extern crate rv3028c7_rtc;
 
 use anyhow::Result;
 use linux_embedded_hal::I2cdev;
-use chrono::{Duration, Utc};
-use rv3028c7_rtc::{
-    RV3028,
-    DateTimeAccess,
-    NaiveDateTime, EventTimeStampLogger, TS_EVENT_SOURCE_BSF
-};
+use chrono::{Utc};
+use rv3028c7_rtc::{RV3028, DateTimeAccess, Duration, Weekday, NaiveDate, NaiveDateTime, NaiveTime, Datelike, Timelike, EventTimeStampLogger, TS_EVENT_SOURCE_BSF, ClockoutRate, TrickleChargeCurrentLimiter};
 use std::thread::sleep;
+use embedded_hal::blocking::i2c::{Write, Read, WriteRead};
 
 /// Example testing real RTC communications,
 /// assuming linux environment (such as Raspberry Pi 3+)
@@ -28,8 +25,105 @@ fn get_sys_datetime_timestamp() -> (NaiveDateTime, u32) {
     (now.naive_utc(), now_timestamp.try_into().unwrap() )
 }
 
+fn verify_write_protection<I2C,E>(rtc: &mut RV3028<I2C>) -> Result<(),E>
+    where
+      I2C: Write<Error = E> + Read<Error = E> + WriteRead<Error = E>,
+      E: std::fmt::Debug
+{
+    // We test the configuration with User Ram, which is innocuous
+    let initial_uram = rtc.get_user_ram()?;
+    println!("initial_uram {:?}", initial_uram);
+
+    const INIT_USER_RAM: [u8; 2] = [55u8,77];
+    const CHECK_USER_RAM: [u8; 2] = [44u8, 66];
+    const FINAL_USER_RAM: [u8; 2] = [0u8;2];
+
+    rtc.set_user_ram(&INIT_USER_RAM)?;
+    let pre_protect_uram = rtc.get_user_ram()?;
+    println!("pre_protect_uram {:?}", pre_protect_uram);
+    assert_eq!(pre_protect_uram, INIT_USER_RAM);
+
+    if !rtc.check_write_protect_enabled()? {
+        // now ensure that the password is set and enabled in EEPROM
+        rtc.set_write_protect_password(&LONG_CLOCK_PASSWORD, true)?;
+    }
+
+    //verify the WP password is as expected
+    if rtc.check_write_protect_enabled()? {
+        rtc.enter_user_password(&LONG_CLOCK_PASSWORD)?;
+        // read back the current write-protection password stored in EEPROM
+        // this is only readable if wp is unlocked
+        let ur_wp_pass = rtc.get_write_protect_password()?;
+        println!("wp password in eeprom is: {:?} expect: {:?}", ur_wp_pass, LONG_CLOCK_PASSWORD);
+    }
+
+    // this write to user RAM register should fail because password mismatches EEPROM
+    rtc.enter_user_password(&BOGUS_PASSWORD)?;
+    rtc.set_user_ram(&CHECK_USER_RAM)?;
+    let post_protect_uram = rtc.get_user_ram()?;
+    println!("post_protect_uram {:?}", post_protect_uram);
+    assert_ne!(post_protect_uram, CHECK_USER_RAM);
+
+    // this write to user RAM register should pass because password matches EEPROM
+    rtc.enter_user_password(&LONG_CLOCK_PASSWORD)?;
+    rtc.set_user_ram(&FINAL_USER_RAM)?;
+    let post_unlocked_uram = rtc.get_user_ram()?;
+    println!("post_unlocked_uram {:?}", post_unlocked_uram);
+    assert_eq!(post_unlocked_uram, FINAL_USER_RAM);
+
+    // leave the user password in RAM as bogus,
+    // effectively locking the write-protect registers
+    rtc.enter_user_password(&BOGUS_PASSWORD)?;
+    Ok(())
+}
+
+// Set the alarm alarm set, and verify the value is set
+fn verify_alarm_set<I2C,E>(rtc: &mut RV3028<I2C>, alarm_dt: &NaiveDateTime,
+                           weekday: Option<Weekday>,
+                           match_day: bool, match_hour: bool, match_minute: bool)
+    where
+      I2C: Write<Error = E> + Read<Error = E> + WriteRead<Error = E>,
+      E: std::fmt::Debug
+{
+    rtc.set_alarm( &alarm_dt, weekday,
+                   match_day, match_hour, match_minute).unwrap();
+
+    let (dt, out_weekday, out_match_day, out_match_hour, out_match_minute) =
+      rtc.get_alarm_datetime_wday_matches().unwrap();
+    if let Some(inner_weekday) = weekday {
+        println!("weekday alarm dt: {} wd: {} match_day: {} match_hour: {} match_minute; {}",
+                 dt, inner_weekday, out_match_day, out_match_hour, out_match_minute
+        );
+    }
+    else {
+        println!("date alarm dt: {} match_day: {} match_hour: {} match_minute: {}",
+                 dt, out_match_day, out_match_hour, out_match_minute
+        );
+    }
+
+    assert!(!rtc.check_and_clear_alarm().unwrap());// alarm should not trigger
+
+    assert_eq!(match_day, out_match_day);
+    assert_eq!(match_hour, out_match_hour);
+    assert_eq!(match_minute, out_match_minute);
+
+    if weekday.is_some() {
+        // weekday-based alarm
+        assert_eq!(out_weekday, weekday);
+    }
+    else {
+        // date-based alarm
+        assert_eq!(dt.date().day(), alarm_dt.date().day());
+    }
+
+    assert_eq!(dt.time().hour(), alarm_dt.time().hour());
+    assert_eq!(dt.time().minute(), alarm_dt.time().minute());
+
+}
+
+const ANCIENT_PASSWORD: [u8; 4] = [0xBB,0xFE,0xED,0xD0]; //[187, 254, 237, 208];
 const LONG_CLOCK_PASSWORD: [u8; 4] = [0xFE,0xED,0xD0,0xBB];
-const BOGUS_PASSWORD: [u8; 4] = [0xFE,0xED,0xFA,0xDE];
+const BOGUS_PASSWORD: [u8; 4] = [0xDE,0xED,0xFA,0xDE];
 
 fn main() -> Result<()> {
 
@@ -40,8 +134,9 @@ fn main() -> Result<()> {
     let mut rtc = RV3028::new(i2c);
 
     // preemptively set the user password in case it has already been written to EEPROM
-    if rtc.check_writer_password_enabled()? {
+    if rtc.check_write_protect_enabled()? {
         println!("Write protection enabled-- entering password");
+        // rtc.set_ancient_password()?;
         rtc.enter_user_password(&LONG_CLOCK_PASSWORD)?;
     }
 
@@ -60,11 +155,33 @@ fn main() -> Result<()> {
     println!("sys dt: {}", sys_dt);
     println!("rtc dt: {}", rtc_dt);
 
+    // disable any INT output
+    rtc.clear_all_int_out_bits()?;
+    // disable any CLKOUT output on internal interrupt flags
+    rtc.clear_all_int_clockout_bits()?;
+
     // enable switchover to backup power supply (on Vbackup)
-    rtc.clear_all_int_out_bits().unwrap();
-    if let Ok(backup_set) = rtc.toggle_backup_switchover(true) {
-        println!("backup_set:  {}", backup_set);
-    }
+    let backup_set = rtc.toggle_backup_switchover(true)?;
+    println!("Vbackup switchover enabled:  {}", backup_set);
+
+    // disable trickle charging. We assume a long-lived Vbackup source,
+    // and/or a reliable Vdd supply
+    let trickle_enabled= rtc.config_trickle_charge(
+        false, TrickleChargeCurrentLimiter::Ohms15k)?;
+    println!("trickle charge enabled: {}", trickle_enabled);
+
+    // Configure a recurring alarm to go off every year at the turn of the new year
+    let alarm_date = NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+    let alarm_time = NaiveTime::from_num_seconds_from_midnight_opt(0,0).unwrap();
+    let alarm_dt = NaiveDateTime::new(alarm_date, alarm_time);
+    println!("alarm_dt: {}", alarm_dt);
+    verify_alarm_set(
+        &mut rtc, &alarm_dt, None, true, true, true);
+    // set INT pin high when alarm goes off
+    rtc.toggle_alarm_int_enable(true)?;
+    // drive CLKOUT when alarm goes off
+    rtc.toggle_clockout_on_alarm(true)?;
+    rtc.config_clockout(true, ClockoutRate::Clkout1Hz)?;
 
     // if you don't care about logging when Vbackup switchovers take place, you can disable:
     // rtc.toggle_timestamp_logging(false);
@@ -90,28 +207,8 @@ fn main() -> Result<()> {
         sleep(sleep_duration);
     }
 
-    // TODO password-protect WP registers
-    let initial_user_ram = rtc.get_user_ram()?;
-    println!("initial_user_ram {:?}",initial_user_ram);
-
-    rtc.set_user_ram(&[55u8,77])?;
-    let pre_user_ram = rtc.get_user_ram()?;
-    println!("pre_user_ram {:?}",pre_user_ram);
-
-    rtc.set_writer_password(&LONG_CLOCK_PASSWORD, true)?;
-
-    // this write to user RAM register should fail because password mismatches EEPROM
-    rtc.enter_user_password(&BOGUS_PASSWORD)?;
-    rtc.set_user_ram(&[44u8,66])?;
-    let post_user_ram = rtc.get_user_ram()?;
-    println!("post_user_ram {:?}",post_user_ram);
-
-    // this write to user RAM register should pass because password matches EEPROM
-    rtc.enter_user_password(&LONG_CLOCK_PASSWORD)?;
-    rtc.set_user_ram(&[44u8,66])?;
-    let post_user_ram = rtc.get_user_ram()?;
-    println!("post_user_ram {:?}",post_user_ram);
-
+    // === Password-protect write protect (WP) registers ===
+    verify_write_protection(&mut rtc)?;
 
     Ok(())
 

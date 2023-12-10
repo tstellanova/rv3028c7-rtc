@@ -131,6 +131,8 @@ const REG_EEPROM_EE_CMD: u8 = 0x27;
 const REG_EEPROM_PASSWORD_ENABLE: u8 = 0x30;
 // EEPROM Password 0 (first of four)
 const REG_EEPROM_PASSWORD_0: u8 = 0x31;
+// EEPROM CLKOUT control register
+const REG_EEPROM_CLKOUT: u8 = 0x35;
 // RAM mirror of EEPROM config values
 const REG_EEPROM_BACKUP_CONFIG: u8 = 0x37;
 
@@ -236,7 +238,7 @@ enum RegControl2Bits {
 
 // EEPROM_MIRROR_ADDRESS / EEPROM mirror register bits:
 #[repr(u8)]
-enum RegEepromMirrorBits {
+enum RegEepromBackupBits {
   // CLKOE / CLKOUT Enable bit -- if 1 (default) then normal clock output
   ClockoutOutputEnableBit = 1 << 7,
   // BCIE / Backup Switchover Interrupt Enable bit bit
@@ -255,6 +257,22 @@ pub enum TrickleChargeCurrentLimiter {
   Ohms5k = 0b01,
   Ohms9k = 0b10,
   Ohms15k = 0b11,
+}
+
+/// Used for controlling the CLKOUT rate via the
+/// FD register (EEPROM 35h)
+#[repr(u8)]
+pub enum ClockoutRate {
+  /// 32.768 kHz –Default value on delivery
+  Clkout32768Khz = 0b000,
+  Clkout8192Hz = 0b001,
+  Clkout1024Hz = 0b010,
+  Clkout64Hz = 0b011,
+  Clkout1Hz = 0b101,
+  /// Predefined periodic countdown timer (PCT) interrupt
+  ClkoutPct = 0b110,
+  /// All Frequency selection bits. Value sets CLKOUT = Low
+  ClkoutFreqSelectionBits = 0b111,
 }
 
 // Special alarm register value
@@ -317,19 +335,10 @@ impl<I2C, E> RV3028<I2C>
     }
   }
 
-  // fn write_register(&mut self, reg: u8, data: u8) -> Result<(), E> {
-  //   self.select_mux_channel()?;
-  //   self.write_register_raw(reg, data)
-  // }
 
   fn write_register_raw(&mut self, reg: u8, data: u8) -> Result<(), E> {
     self.i2c.write(RV3028_ADDRESS, &[reg, data])
   }
-
-  // fn read_register(&mut self, reg: u8) -> Result<u8, E> {
-  //   self.select_mux_channel()?;
-  //   self.read_register_raw(reg)
-  // }
 
   fn read_register_raw(&mut self, reg: u8) -> Result<u8, E> {
     let mut buf = [0];
@@ -374,9 +383,7 @@ impl<I2C, E> RV3028<I2C>
   /// Check whether a switchover to Vbackup power supply has
   /// occurred at least once.
   pub fn check_backup_event_flag(&mut self)-> Result<bool, E>  {
-    let bits_val = self.get_bits_value(
-      REG_STATUS, RegStatusBits::BackupSwitchFlag as u8)?;
-    Ok(0 != bits_val)
+    self.check_bits_nonzero(REG_STATUS, RegStatusBits::BackupSwitchFlag as u8)
   }
 
 
@@ -393,32 +400,49 @@ impl<I2C, E> RV3028<I2C>
   }
 
 
-  // write a single EEPROM register
-  // - `ee_address` The memory address within the eeprom
-  fn eeprom_write_raw(&mut self, ee_address: u8, data: u8) -> Result<(), E> {
-    self.toggle_auto_eeprom_refresh_raw(true)?;
-    while self.is_eeprom_busy_raw()? {}
-    self.write_register_raw(REG_EEPROM_EE_ADDRESS, ee_address)?;
-    self.write_register_raw(REG_EEPROM_EE_DATA, data)?;    // the data to be written to ee_address
-    self.write_register_raw(REG_EEPROM_EE_CMD, 0x00)?; // first cmd must be zero
-    let res= self.write_register_raw(REG_EEPROM_EE_CMD, 0x21); //write a single byte
-    while self.is_eeprom_busy_raw()? {}
-    self.toggle_auto_eeprom_refresh_raw(false)?;
-    res
-  }
+  // // write a single EEPROM register
+  // // - `ee_address` The memory address within the eeprom
+  // fn eeprom_write_raw(&mut self, ee_address: u8, data: u8) -> Result<(), E> {
+  //   self.toggle_auto_eeprom_refresh_raw(true)?;
+  //   while self.is_eeprom_busy_raw()? {}
+  //   self.write_register_raw(REG_EEPROM_EE_ADDRESS, ee_address)?;
+  //   self.write_register_raw(REG_EEPROM_EE_DATA, data)?;    // the data to be written to ee_address
+  //   self.write_register_raw(REG_EEPROM_EE_CMD, 0x00)?; // first cmd must be zero
+  //   let res= self.write_register_raw(REG_EEPROM_EE_CMD, 0x21); //write a single byte
+  //   while self.is_eeprom_busy_raw()? {}
+  //   self.toggle_auto_eeprom_refresh_raw(false)?;
+  //   res
+  // }
+  //
+  // // read a single register from EEPROM
+  // // - `ee_address` The memory address within the eeprom
+  // fn eeprom_read_raw(&mut self, ee_address: u8) -> Result<u8, E> {
+  //   self.toggle_auto_eeprom_refresh_raw(true)?;
+  //   while self.is_eeprom_busy_raw()? {}
+  //   self.write_register_raw(REG_EEPROM_EE_ADDRESS, ee_address)?;
+  //   self.write_register_raw(REG_EEPROM_EE_CMD, 0x00)?; // first cmd must be zero
+  //   self.write_register_raw(REG_EEPROM_EE_CMD, 0x22)?; // read a single byte
+  //   let res = self.read_register_raw(REG_EEPROM_EE_DATA);
+  //   while self.is_eeprom_busy_raw()? {}
+  //   self.toggle_auto_eeprom_refresh_raw(false)?;
+  //   res
+  // }
 
-  // read a single register from EEPROM
-  // - `ee_address` The memory address within the eeprom
-  fn eeprom_read_raw(&mut self, ee_address: u8) -> Result<u8, E> {
+  // read multiple sequential registers from EEPROM
+  // - `start_ee_address` The memory address within the eeprom to start reading
+  fn eeprom_multi_read_raw(&mut self, start_ee_address: u8, read_buf: &mut [u8]) -> Result<(), E> {
     self.toggle_auto_eeprom_refresh_raw(true)?;
     while self.is_eeprom_busy_raw()? {}
-    self.write_register_raw(REG_EEPROM_EE_ADDRESS, ee_address)?;
-    self.write_register_raw(REG_EEPROM_EE_CMD, 0x00)?; // first cmd must be zero
-    self.write_register_raw(REG_EEPROM_EE_CMD, 0x22)?; // read a single byte
-    let res = self.read_register_raw(REG_EEPROM_EE_DATA);
+    for i in 0..(read_buf.len() ) {
+      let ee_address = start_ee_address + (i as u8);
+      self.write_register_raw(REG_EEPROM_EE_ADDRESS, ee_address)?;
+      self.write_register_raw(REG_EEPROM_EE_CMD, 0x00)?; // first cmd must be zero
+      self.write_register_raw(REG_EEPROM_EE_CMD, 0x22)?; // read a single byte
+      read_buf[i] = self.read_register_raw(REG_EEPROM_EE_DATA)?;
+    }
     while self.is_eeprom_busy_raw()? {}
     self.toggle_auto_eeprom_refresh_raw(false)?;
-    res
+    Ok(())
   }
 
   // Update all of the EEPROM registers from the EEPROM RAM mirror
@@ -432,21 +456,21 @@ impl<I2C, E> RV3028<I2C>
     res
   }
 
-  // Read all of the EEPROM registers into their corresponding RAM mirrors
-  fn eeprom_refresh_all(&mut self) -> Result<(), E> {
-    self.toggle_auto_eeprom_refresh_raw(true)?;
-    while self.is_eeprom_busy_raw()? {}
-
-    //  writing the command 00h into the register EECMD,
-    // and then the second command 12h into the register EECMD
-    // will start the copy of the configuration into the RAM mirror
-
-    self.write_register_raw(REG_EEPROM_EE_CMD, 0x00)?; // first cmd must be zero
-    let res = self.write_register_raw(REG_EEPROM_EE_CMD, 0x12); // refresh all
-    while self.is_eeprom_busy_raw()? {}
-    self.toggle_auto_eeprom_refresh_raw(false)?;
-    res
-  }
+  // // Read all of the EEPROM registers into their corresponding RAM mirrors
+  // fn eeprom_refresh_all(&mut self) -> Result<(), E> {
+  //   self.toggle_auto_eeprom_refresh_raw(true)?;
+  //   while self.is_eeprom_busy_raw()? {}
+  //
+  //   //  writing the command 00h into the register EECMD,
+  //   // and then the second command 12h into the register EECMD
+  //   // will start the copy of the configuration into the RAM mirror
+  //
+  //   self.write_register_raw(REG_EEPROM_EE_CMD, 0x00)?; // first cmd must be zero
+  //   let res = self.write_register_raw(REG_EEPROM_EE_CMD, 0x12); // refresh all
+  //   while self.is_eeprom_busy_raw()? {}
+  //   self.toggle_auto_eeprom_refresh_raw(false)?;
+  //   res
+  // }
 
   // Set specific bits in a register: "raw" means it skips the mux
   // all bits must be high that you wish to set
@@ -456,14 +480,7 @@ impl<I2C, E> RV3028<I2C>
     self.write_register_raw(reg, reg_val)
   }
 
-  // clear specific bits in a register:
-  // all bits must be high that you wish to be cleared
-  // fn clear_reg_bits(&mut self, reg: u8, bits: u8) -> Result<(), E> {
-  //   self.select_mux_channel()?;
-  //   self.clear_reg_bits_raw(reg,bits)
-  // }
-
-  // Clears specific bits in a register, skips the mux.
+  // Clears specific bits in a register: "raw" means it skips the mux.
   // All bits must be high that you wish to be cleared
   fn clear_reg_bits_raw(&mut self, reg: u8, bits: u8) -> Result<(), E> {
     let mut reg_val = self.read_register_raw(reg)?;
@@ -476,27 +493,27 @@ impl<I2C, E> RV3028<I2C>
   /// - `limit_resistance` Sets the current limiting resistor value: higher means less current
   /// Disabling also resets the `limit_resistance` to 3 kΩ, the factory default.
   /// Returns the status of trickle charging (true for enabled, false for disabled)
-  pub fn toggle_trickle_charge(&mut self, enable: bool,
+  pub fn config_trickle_charge(&mut self, enable: bool,
                                limit_resistance: TrickleChargeCurrentLimiter) -> Result<bool, E>  {
     self.select_mux_channel()?;
 
     // First disable charging before changing settings
     self.clear_reg_bits_raw(
-      REG_EEPROM_BACKUP_CONFIG, RegEepromMirrorBits::TrickleChargeEnableBit as u8)?;
+      REG_EEPROM_BACKUP_CONFIG, RegEepromBackupBits::TrickleChargeEnableBit as u8)?;
     // Reset TCR to 3 kΩ, the factory default, by clearing the TCR bits
     self.clear_reg_bits_raw(
-      REG_EEPROM_BACKUP_CONFIG, RegEepromMirrorBits::TrickleChargeResistanceBits as u8 )?;
+      REG_EEPROM_BACKUP_CONFIG, RegEepromBackupBits::TrickleChargeResistanceBits as u8 )?;
 
     if enable {
-      self.set_reg_bits_raw(REG_EEPROM_BACKUP_CONFIG, limit_resistance as u8)?; //TODO
       self.set_reg_bits_raw(
-        REG_EEPROM_BACKUP_CONFIG, RegEepromMirrorBits::TrickleChargeEnableBit as u8)?;
+        REG_EEPROM_BACKUP_CONFIG, limit_resistance as u8)?;
+      self.set_reg_bits_raw(
+        REG_EEPROM_BACKUP_CONFIG, RegEepromBackupBits::TrickleChargeEnableBit as u8)?;
     }
 
     // confirm the value set
-    let conf_val =
-      0 != self.read_register_raw(REG_EEPROM_BACKUP_CONFIG)?
-        & RegEepromMirrorBits::TrickleChargeEnableBit as u8;
+    let conf_val = self.check_bits_nonzero_raw(
+      REG_EEPROM_BACKUP_CONFIG, RegEepromBackupBits::TrickleChargeEnableBit as u8)?;
     Ok(conf_val)
   }
 
@@ -509,10 +526,10 @@ impl<I2C, E> RV3028<I2C>
     self.clear_reg_bits_raw(REG_STATUS, RegStatusBits::BackupSwitchFlag as u8)?;
 
     self.set_or_clear_reg_bits_raw(
-      REG_EEPROM_BACKUP_CONFIG, RegEepromMirrorBits::BackupSwitchoverDsm as u8, enable)?;
+      REG_EEPROM_BACKUP_CONFIG, RegEepromBackupBits::BackupSwitchoverDsm as u8, enable)?;
     let conf_val =
       0 != self.read_register_raw(
-        REG_EEPROM_BACKUP_CONFIG)? & RegEepromMirrorBits::BackupSwitchoverDsm as u8;
+        REG_EEPROM_BACKUP_CONFIG)? & RegEepromBackupBits::BackupSwitchoverDsm as u8;
     Ok(conf_val)
   }
 
@@ -527,8 +544,14 @@ impl<I2C, E> RV3028<I2C>
   }
 
 
-  /// Get the current value of the EEPROM mirror from RAM
-  pub fn get_eeprom_mirror_value(&mut self) -> Result<u8, E> {
+  /// Enable or disable CLKOUT when alarm triggers
+  pub fn toggle_clockout_on_alarm(&mut self, enable: bool) -> Result<(), E> {
+    self.set_or_clear_reg_bits(
+      REG_CLOCK_INTERRUPT_MASK, RegClockIntMaskBits::ClockoutOnAlarmBit as u8, enable)
+  }
+
+  /// Get the current value of the EEPROM backup config from RAM mirror
+  pub fn get_eeprom_backup_config(&mut self) -> Result<u8, E> {
     self.select_mux_channel()?;
     let reg_val = self.read_register_raw(REG_EEPROM_BACKUP_CONFIG)?;
     Ok(reg_val)
@@ -544,9 +567,16 @@ impl<I2C, E> RV3028<I2C>
     Ok(())
   }
 
-  /// Set the "permanent" writer password that unlocks the ability to write to "WP" registers
-  /// Warning: This modifies EEPROM settings (eventually)
-  pub fn set_writer_password(&mut self, password: &[u8; 4], enable: bool)  -> Result<(), E> {
+  // pub fn set_ancient_password(&mut self) -> Result<(), E> {
+  //   let mut write_buf: [u8; 5] = [REG_USER_PASSWORD_0, 187, 254, 237, 208];
+  //   self.i2c.write(RV3028_ADDRESS, &write_buf)?;
+  //   Ok(())
+  // }
+
+  /// Set the "permanent" write protection password that
+  /// guards the permission to write to "WP" registers
+  /// Warning: This modifies EEPROM settings.
+  pub fn set_write_protect_password(&mut self, password: &[u8; 4], enable: bool) -> Result<(), E> {
     self.select_mux_channel()?;
     // To code a new password, the user has to first enter the current
     // (correct) Password PW (PW = EEPW) into registers 21h to 24h,
@@ -559,19 +589,43 @@ impl<I2C, E> RV3028<I2C>
     write_buf[1..5].copy_from_slice(password);
     self.i2c.write(RV3028_ADDRESS, &write_buf)?;
 
-    self.write_register_raw( REG_EEPROM_PASSWORD_ENABLE, if enable { 255 } else { 0} )?;
+    self.toggle_write_protect_enabled(enable)?;
     self.eeprom_update_all_raw()?;
     Ok(())
   }
 
-  /// Check whether the RTC has password enabled for all registers marked with
+  /// Read back the write-protection password from EEPROM.
+  /// Note that this will only succeed (return nonzero values) if
+  /// write-protection is already unlocked
+  /// (by setting a user password that matches the actual write-protection password)
+  pub fn get_write_protect_password(&mut self) -> Result<[u8;4], E> {
+    self.select_mux_channel()?;
+    let mut read_buf = [0u8;4];
+    self.eeprom_multi_read_raw(REG_EEPROM_PASSWORD_0, &mut read_buf)?;
+    Ok(read_buf)
+  }
+
+  /// Check whether the RTC has write-protection enabled for all registers marked with
   /// "WP" for "Write Protected"
-  pub fn check_writer_password_enabled(&mut self,)  -> Result<bool, E> {
+  pub fn check_write_protect_enabled(&mut self,) -> Result<bool, E> {
     self.select_mux_channel()?;
     let reg_val = self.read_register_raw( REG_EEPROM_PASSWORD_ENABLE)?;
     Ok( reg_val == 255 )
   }
 
+  /// Enable or disable write protection.
+  /// If write protection is enabled, and this method attempts to disable it,
+  /// The user password MUST already be set to a value that matches the
+  /// EEPROM setting, in order for this method to successfully update.
+  /// - returns the (possibly updated) value of write protection.
+  pub fn toggle_write_protect_enabled(&mut self, enable: bool) -> Result<bool, E> {
+    self.select_mux_channel()?;
+    self.write_register_raw( REG_EEPROM_PASSWORD_ENABLE, if enable { 255 } else { 0} )?;
+    let reg_val = self.read_register_raw( REG_EEPROM_PASSWORD_ENABLE)?;
+    Ok( reg_val == 255 )
+  }
+
+  /// Set the value of the User Ram registers (two bytes)
   pub fn set_user_ram(&mut self, data: &[u8; 2]) -> Result<(), E> {
     self.select_mux_channel()?;
     let mut write_buf: [u8; 3] = [0x1F, 0,0]; // User RAM 1 register
@@ -580,6 +634,7 @@ impl<I2C, E> RV3028<I2C>
     Ok(())
   }
 
+  /// Get the value of the User Ram registers (two bytes)
   pub fn get_user_ram(&mut self) -> Result<[u8; 2], E> {
     self.select_mux_channel()?;
     let mut read_buf = [0u8; 2];
@@ -587,8 +642,8 @@ impl<I2C, E> RV3028<I2C>
     Ok(read_buf)
   }
 
-  // Set the bcd time tracking registers
-  // assumes `select_mux_channel` has already been called
+  // Set the bcd time tracking registers.
+  // Assumes `select_mux_channel` has already been called
   fn set_time_raw(&mut self, time: &NaiveTime) -> Result<(), E> {
     let write_buf = [
       REG_SECONDS, // select the first register
@@ -742,7 +797,7 @@ impl<I2C, E> RV3028<I2C>
                           RegControl2Bits::EventIntEnableBit as u8  )?;
     // BSIE
     self.clear_reg_bits_raw(
-      REG_EEPROM_BACKUP_CONFIG, RegEepromMirrorBits::BackupSwitchIntEnableBit as u8)?;
+      REG_EEPROM_BACKUP_CONFIG, RegEepromBackupBits::BackupSwitchIntEnableBit as u8)?;
 
     // PORIE -- must be set in EEPROM -- don't bother to set?
     Ok(())
@@ -800,6 +855,12 @@ impl<I2C, E> RV3028<I2C>
     let alarm_flag_set = 0 != self.check_and_clear_bits(
       REG_STATUS, RegStatusBits::AlarmFlagBit as u8)?;
     Ok(alarm_flag_set)
+  }
+
+  /// Check whether the alarm flag (AF) is set
+  pub fn check_alarm_flag(&mut self) -> Result<bool, E> {
+    // Check if the AF flag is set
+    self.check_bits_nonzero(REG_STATUS, RegStatusBits::AlarmFlagBit as u8)
   }
 
   /// All-in-one method to set an alarm:
@@ -900,13 +961,14 @@ impl<I2C, E> RV3028<I2C>
   }
 
 
-
   // If `set` is true, set the high bits given in `bits`, otherwise clear those bits
   fn set_or_clear_reg_bits(&mut self, reg: u8, bits: u8, set: bool) -> Result<(), E> {
     self.select_mux_channel()?;
     self.set_or_clear_reg_bits_raw(reg, bits, set)
   }
 
+  // If `set` is true, set the high bits given in `bits`, otherwise clear those bits;
+  // skips mux
   fn set_or_clear_reg_bits_raw(&mut self, reg: u8, bits: u8, set: bool) -> Result<(), E> {
     if set {
       self.set_reg_bits_raw(reg, bits)
@@ -917,19 +979,32 @@ impl<I2C, E> RV3028<I2C>
   }
 
 
-  /// Enables or disables default CLKOUT behavior
-  pub fn toggle_plain_clockout(&mut self, enable: bool) -> Result<(), E> {
+  /// Set the CLKOUT pin frequency, when clockout is enabled
+  pub fn set_clockout_rate(&mut self, rate: ClockoutRate)-> Result<(), E> {
     self.select_mux_channel()?;
-    // TODO self.clear_reg_bits_raw(REG_STATUS, RegStatusBits::ClockIntFlagBit as u8)?;
-    self.set_or_clear_reg_bits_raw(
-      REG_EEPROM_BACKUP_CONFIG, RegEepromMirrorBits::ClockoutOutputEnableBit as u8, enable)
+    self.clear_reg_bits_raw(REG_EEPROM_CLKOUT, ClockoutRate::ClkoutFreqSelectionBits as u8)?;
+    self.set_reg_bits_raw(REG_EEPROM_CLKOUT, rate as u8)
   }
 
-  /// Enables or disables interrupt-controlled CLKOUT
-  pub fn toggle_int_clockout(&mut self, enable: bool)  -> Result<(), E> {
+
+  /// Configures the behavior of the CLKOUT pin
+  /// - `int_enable` enables or disables interrupt-controlled clockout.
+  /// If false, use plain or "normal" clockout.
+  /// - `rate` sets the clockout frequency
+  pub fn config_clockout(&mut self, int_enable: bool, rate: ClockoutRate) -> Result<(), E> {
     self.select_mux_channel()?;
+
+    // configure the clockout rate
+    self.clear_reg_bits_raw(REG_EEPROM_CLKOUT, ClockoutRate::ClkoutFreqSelectionBits as u8)?;
+    self.set_reg_bits_raw(REG_EEPROM_CLKOUT, rate as u8)?;
+
+    // if we're enabling interrupt-controlled clockout, need to disable CLKOE
     self.set_or_clear_reg_bits_raw(
-    REG_CONTROL2,  RegControl2Bits::ClockoutIntEnableBit as u8, enable)
+      REG_EEPROM_BACKUP_CONFIG, RegEepromBackupBits::ClockoutOutputEnableBit as u8,
+      !int_enable)?;
+
+    self.set_or_clear_reg_bits_raw(
+      REG_CONTROL2, RegControl2Bits::ClockoutIntEnableBit as u8, int_enable)
   }
 
   // Configure the Periodic Countdown Timer prior to the next countdown.
@@ -1057,12 +1132,18 @@ impl<I2C, E> RV3028<I2C>
     Ok(bits_val)
   }
 
-  fn get_bits_value(&mut self, reg: u8, bits: u8) -> Result<u8, E> {
+  fn check_bits_nonzero(&mut self, reg: u8, bits: u8) -> Result<bool, E> {
     self.select_mux_channel()?;
+    self.check_bits_nonzero_raw(reg, bits)
+  }
+
+  fn check_bits_nonzero_raw(&mut self, reg: u8, bits: u8) -> Result<bool, E> {
     let reg_val = self.read_register_raw(reg)?;
     let bits_val =  reg_val & bits;
-    Ok(bits_val)
+    Ok(0 != bits_val)
   }
+
+
 
   /// Configure event detection on the EVI pin
   /// - `rising` whether edge detection is on rising edge / high level

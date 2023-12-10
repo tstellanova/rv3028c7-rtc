@@ -103,8 +103,8 @@ fn main() {
     let (year, month, day) = rtc.get_ymd().unwrap();
     println!("start sys {} rtc {} ymd {} {} {} ", sys_unix_timestamp, rtc_unix_time, year,month,day);
 
-    // disable alarm interrupts to begin with
-    rtc.toggle_alarm_int_enable(false).unwrap();
+    // disable interrupt outputs on INT pin to begin with
+    rtc.clear_all_int_out_bits().unwrap();
 
     let (first_alarm_dt, _out_weekday, _out_match_day, _out_match_hour, _out_match_minute) =
       rtc.get_alarm_datetime_wday_matches().unwrap();

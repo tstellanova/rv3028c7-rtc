@@ -35,7 +35,7 @@ fn main() {
     println!("start sys {}\r\nrtc1 {}\r\n", sys_dt, dt1);
 
     // enable trickle charging
-    let one_enabled = rtc1.toggle_trickle_charge(
+    let one_enabled = rtc1.config_trickle_charge(
         true, TrickleChargeCurrentLimiter::Ohms15k).unwrap();
     println!("rtc1 trickle enabled: {}",one_enabled);
 
@@ -49,7 +49,7 @@ fn main() {
     std::thread::sleep(dur.to_std().unwrap());
 
     // disable trickle charging
-    let one_enabled = rtc1.toggle_trickle_charge(
+    let one_enabled = rtc1.config_trickle_charge(
         false, TrickleChargeCurrentLimiter::Ohms3k).unwrap();
     println!("rtc1 trickle enabled: {}",one_enabled);
 
