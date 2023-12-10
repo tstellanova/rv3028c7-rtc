@@ -339,6 +339,19 @@ impl<I2C, E> RV3028<I2C>
     Ok(flag_set)
   }
 
+  /// Check whether an Automatic Backup Switchover event
+  /// (switching over to backup power source, Vbackup)
+  /// has taken place, as indicated by the
+  /// Backup Switch Flag (BSF).
+  /// This method also clears the BSF flag.
+  /// See AUTOMATIC BACKUP SWITCHOVER FUNCTION.
+  pub fn check_and_clear_backup_event(&mut self)-> Result<bool, E>  {
+    let flag_set = 0 != self.check_and_clear_bits(
+      REG_STATUS, RegStatusBits::BackupSwitchFlag as u8)?;
+    Ok(flag_set)
+  }
+
+
   // TODO these methods have not been thoroughly tested, and are believed broken.
   // fn is_eeprom_busy(&mut self) -> Result<bool, E> {
   //   let status = self.read_register(REG_STATUS)?;
@@ -442,6 +455,8 @@ impl<I2C, E> RV3028<I2C>
   /// Returns the set value
   pub fn toggle_backup_switchover(&mut self, enable: bool) -> Result<bool, E> {
     self.select_mux_channel()?;
+    self.clear_reg_bits_raw(REG_STATUS, RegStatusBits::BackupSwitchFlag as u8)?;
+
     self.set_or_clear_reg_bits_raw(
       EEPROM_MIRROR_ADDRESS, RegEepromMirrorBits::BackupSwitchoverDsm as u8, enable)?;
     let conf_val =
