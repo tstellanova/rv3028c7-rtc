@@ -25,6 +25,38 @@ fn get_sys_datetime_timestamp() -> (NaiveDateTime, u32) {
     (now.naive_utc(), now_timestamp.try_into().unwrap() )
 }
 
+fn check_passwords_match<I2C,E>(rtc: &mut RV3028<I2C>) -> Result<(),E>
+    where
+      I2C: Write<Error = E> + Read<Error = E> + WriteRead<Error = E>,
+      E: std::fmt::Debug
+{
+    if rtc.check_write_protect_enabled()? {
+        println!("Write protection enabled-- entering password");
+        rtc.enter_user_password(&LONG_CLOCK_PASSWORD)?;
+        // read back the current write-protection password stored in EEPROM
+        // this is only readable if wp is unlocked
+        let (_wp_enabled, ur_wp_pass) = rtc.get_write_protect_settings()?;
+        println!("wp password in eeprom is: {:?} expect: {:?}", ur_wp_pass, LONG_CLOCK_PASSWORD);
+        if ur_wp_pass.ne(&LONG_CLOCK_PASSWORD) {
+            // set the user pass to be the same
+            rtc.enter_user_password(&ur_wp_pass)?;
+            //if ur_wp_pass.eq(&EVEN_LESS_ANCIENT_PASS) {
+                println!(">>> changing to LONG_CLOCK_PASSWORD");
+                rtc.set_write_protect_password(&LONG_CLOCK_PASSWORD, false)?;
+                let (_wp_enabled, new_wp_pass) = rtc.get_write_protect_settings()?;
+                println!("new_wp_pass is: {:?} expect: {:?}", new_wp_pass, LONG_CLOCK_PASSWORD);
+                rtc.enter_user_password(&LONG_CLOCK_PASSWORD)?;
+
+            //}
+        }
+    }
+    else {
+        println!("Write protect disabled");
+    }
+
+    Ok(())
+}
+
 fn verify_write_protection<I2C,E>(rtc: &mut RV3028<I2C>) -> Result<(),E>
     where
       I2C: Write<Error = E> + Read<Error = E> + WriteRead<Error = E>,
@@ -49,13 +81,7 @@ fn verify_write_protection<I2C,E>(rtc: &mut RV3028<I2C>) -> Result<(),E>
     }
 
     //verify the WP password is as expected
-    if rtc.check_write_protect_enabled()? {
-        rtc.enter_user_password(&LONG_CLOCK_PASSWORD)?;
-        // read back the current write-protection password stored in EEPROM
-        // this is only readable if wp is unlocked
-        let ur_wp_pass = rtc.get_write_protect_password()?;
-        println!("wp password in eeprom is: {:?} expect: {:?}", ur_wp_pass, LONG_CLOCK_PASSWORD);
-    }
+    check_passwords_match(rtc)?;
 
     // this write to user RAM register should fail because password mismatches EEPROM
     rtc.enter_user_password(&BOGUS_PASSWORD)?;
@@ -121,9 +147,13 @@ fn verify_alarm_set<I2C,E>(rtc: &mut RV3028<I2C>, alarm_dt: &NaiveDateTime,
 
 }
 
-const ANCIENT_PASSWORD: [u8; 4] = [0xBB,0xFE,0xED,0xD0]; //[187, 254, 237, 208];
+//[255, 254, 237, 208
+// const ANCIENT_PASSWORD: [u8; 4] = [187, 254, 237, 208];
+// const LESS_ANCIENT_PASS : [u8; 4] = [255, 254, 237, 208];
+// const EVEN_LESS_ANCIENT_PASS: [u8;4] = [0, 254, 237, 208];
+
 const LONG_CLOCK_PASSWORD: [u8; 4] = [0xFE,0xED,0xD0,0xBB];
-const BOGUS_PASSWORD: [u8; 4] = [0xDE,0xED,0xFA,0xDE];
+const BOGUS_PASSWORD: [u8; 4] = [0x0A,0x0C,0x0E,0x0D];
 
 fn main() -> Result<()> {
 
@@ -134,11 +164,7 @@ fn main() -> Result<()> {
     let mut rtc = RV3028::new(i2c);
 
     // preemptively set the user password in case it has already been written to EEPROM
-    if rtc.check_write_protect_enabled()? {
-        println!("Write protection enabled-- entering password");
-        // rtc.set_ancient_password()?;
-        rtc.enter_user_password(&LONG_CLOCK_PASSWORD)?;
-    }
+    check_passwords_match(&mut rtc)?;
 
     // Pull the current system time and synchronize RTC time to that
     let (sys_dt, sys_unix_timestamp) = get_sys_datetime_timestamp();

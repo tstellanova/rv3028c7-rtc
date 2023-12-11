@@ -436,8 +436,11 @@ impl<I2C, E> RV3028<I2C>
     for i in 0..(read_buf.len() ) {
       let ee_address = start_ee_address + (i as u8);
       self.write_register_raw(REG_EEPROM_EE_ADDRESS, ee_address)?;
+      while self.is_eeprom_busy_raw()? {}
       self.write_register_raw(REG_EEPROM_EE_CMD, 0x00)?; // first cmd must be zero
+      while self.is_eeprom_busy_raw()? {}
       self.write_register_raw(REG_EEPROM_EE_CMD, 0x22)?; // read a single byte
+      while self.is_eeprom_busy_raw()? {}
       read_buf[i] = self.read_register_raw(REG_EEPROM_EE_DATA)?;
     }
     while self.is_eeprom_busy_raw()? {}
@@ -450,6 +453,7 @@ impl<I2C, E> RV3028<I2C>
     self.toggle_auto_eeprom_refresh_raw(true)?;
     while self.is_eeprom_busy_raw()? {}
     self.write_register_raw(REG_EEPROM_EE_CMD, 0x00)?; // first cmd must be zero
+    while self.is_eeprom_busy_raw()? {}
     let res= self.write_register_raw(REG_EEPROM_EE_CMD, 0x11); //update all
     while self.is_eeprom_busy_raw()? {}
     self.toggle_auto_eeprom_refresh_raw(false)?;
@@ -559,12 +563,17 @@ impl<I2C, E> RV3028<I2C>
 
   /// Enter the password that will unlock the ability to write to "WP" registers
   /// such as the current datetime
-  pub fn enter_user_password(&mut self, password: &[u8; 4]) -> Result<(), E> {
+  pub fn enter_user_password(&mut self, pass: &[u8; 4]) -> Result<(), E> {
     self.select_mux_channel()?;
-    let mut write_buf: [u8; 5] = [REG_USER_PASSWORD_0, 0,0,0,0];
-    write_buf[1..5].copy_from_slice(password);
-    self.i2c.write(RV3028_ADDRESS, &write_buf)?;
-    Ok(())
+    // let mut write_buf: [u8; 5] = [REG_USER_PASSWORD_0, 0,0,0,0];
+    // // write_buf[1..5].copy_from_slice(password);
+    // write_buf[1..=4].copy_from_slice(password);
+    // self.i2c.write(RV3028_ADDRESS, &write_buf)?;
+
+    self.i2c.write(RV3028_ADDRESS,
+                   &[REG_USER_PASSWORD_0, pass[0], pass[1], pass[2], pass[3]])
+
+    // Ok(())
   }
 
   // pub fn set_ancient_password(&mut self) -> Result<(), E> {
@@ -576,7 +585,7 @@ impl<I2C, E> RV3028<I2C>
   /// Set the "permanent" write protection password that
   /// guards the permission to write to "WP" registers
   /// Warning: This modifies EEPROM settings.
-  pub fn set_write_protect_password(&mut self, password: &[u8; 4], enable: bool) -> Result<(), E> {
+  pub fn set_write_protect_password(&mut self, pass: &[u8; 4], enable: bool) -> Result<(), E> {
     self.select_mux_channel()?;
     // To code a new password, the user has to first enter the current
     // (correct) Password PW (PW = EEPW) into registers 21h to 24h,
@@ -585,9 +594,9 @@ impl<I2C, E> RV3028<I2C>
     // and then write the new reference password EEPW
     // into the EEPROM registers 31h to 34h
     // and value = 255 in the EEPWE register to enable password function.
-    let mut write_buf: [u8; 5] = [REG_EEPROM_PASSWORD_0, 0,0,0,0];
-    write_buf[1..5].copy_from_slice(password);
-    self.i2c.write(RV3028_ADDRESS, &write_buf)?;
+
+    self.i2c.write(RV3028_ADDRESS,
+                   &[REG_EEPROM_PASSWORD_0, pass[0], pass[1], pass[2], pass[3]])?;
 
     self.toggle_write_protect_enabled(enable)?;
     self.eeprom_update_all_raw()?;
@@ -598,11 +607,16 @@ impl<I2C, E> RV3028<I2C>
   /// Note that this will only succeed (return nonzero values) if
   /// write-protection is already unlocked
   /// (by setting a user password that matches the actual write-protection password)
-  pub fn get_write_protect_password(&mut self) -> Result<[u8;4], E> {
+  pub fn get_write_protect_settings(&mut self) -> Result<(bool, [u8;4]), E> {
     self.select_mux_channel()?;
-    let mut read_buf = [0u8;4];
-    self.eeprom_multi_read_raw(REG_EEPROM_PASSWORD_0, &mut read_buf)?;
-    Ok(read_buf)
+    let mut read_buf = [0u8;5];
+    self.eeprom_multi_read_raw( REG_EEPROM_PASSWORD_ENABLE,  &mut read_buf)?;
+    let enabled = 0 != read_buf[0];
+
+    let res: [u8; 4] = [read_buf[1], read_buf[2], read_buf[3], read_buf[4]];
+    // res[0..=3].copy_from_slice(&read_buf[1..=4]);
+
+    Ok((enabled, res) )
   }
 
   /// Check whether the RTC has write-protection enabled for all registers marked with
@@ -629,7 +643,9 @@ impl<I2C, E> RV3028<I2C>
   pub fn set_user_ram(&mut self, data: &[u8; 2]) -> Result<(), E> {
     self.select_mux_channel()?;
     let mut write_buf: [u8; 3] = [0x1F, 0,0]; // User RAM 1 register
-    write_buf[1..3].copy_from_slice(data);
+    // write_buf[1..3].copy_from_slice(data);
+    write_buf[1..=2].copy_from_slice(data);
+
     self.i2c.write(RV3028_ADDRESS, &write_buf)?;
     Ok(())
   }

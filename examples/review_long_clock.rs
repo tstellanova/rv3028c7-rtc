@@ -116,8 +116,8 @@ fn cleanup_status_and_logs<I2C,E>(rtc: &mut RV3028<I2C>) -> Result<(),E>
 
   // read back the current write-protection password stored in EEPROM
   // this is only readable if wp is unlocked
-  let ur_wp_pass = rtc.get_write_protect_password()?;
-  println!("wp password in eeprom is: {:?}", ur_wp_pass);
+  let (wp_enabled, ur_wp_pass) = rtc.get_write_protect_settings()?;
+  println!("wp password in eeprom is: {:?} enabled: {}", ur_wp_pass, wp_enabled);
 
   // clear all status flags that may have triggered
   rtc.clear_all_status_flags()?;
