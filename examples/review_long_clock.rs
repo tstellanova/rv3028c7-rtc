@@ -54,8 +54,6 @@ fn read_rtc_status_and_config<I2C,E>(rtc: &mut RV3028<I2C>) -> Result<(),E>
     I2C: Write<Error = E> + Read<Error = E> + WriteRead<Error = E>,
     E: std::fmt::Debug
 {
-  let wp_enabled = rtc.check_write_protect_enabled()?;
-  println!("write protect enabled: {}", wp_enabled);
 
   let uram_val = rtc.get_user_ram()?;
   let user_val: u16 = u16::from_le_bytes(uram_val);
@@ -114,24 +112,21 @@ fn cleanup_status_and_logs<I2C,E>(rtc: &mut RV3028<I2C>) -> Result<(),E>
   // disable write protection temporarily
   rtc.toggle_write_protect_enabled(false)?;
 
-  // read back the current write-protection password stored in EEPROM
-  // this is only readable if wp is unlocked
-  let (wp_enabled, ur_wp_pass) = rtc.get_write_protect_settings()?;
-  println!("wp password in eeprom is: {:?} enabled: {}", ur_wp_pass, wp_enabled);
-
   // clear all status flags that may have triggered
   rtc.clear_all_status_flags()?;
 
   // clear out the event timestamp logs
   rtc.reset_timestamp_log()?;
 
-
+  // update the value in user ram to reflect the number of times this app has run
   let uram_val = rtc.get_user_ram()?;
-  let user_val: u16 = u16::from_le_bytes(uram_val);
+  let user_val = u16::from_le_bytes(uram_val);
   let new_user_val = user_val + 1;
   let new_uram_val = new_user_val.to_le_bytes();
   rtc.set_user_ram(&new_uram_val)?;
-  println!("user RAM value: old {} new {} ", user_val, new_user_val);
+  let verify_uram_val = rtc.get_user_ram()?;
+  let verify_user_val: u16 = u16::from_le_bytes(verify_uram_val);
+  println!("user RAM value: old {} new {} verify: {}", user_val, new_user_val, verify_user_val);
 
   // done with dangerous changes -- lock the write-protected areas
   let wp_reenabled = rtc.toggle_write_protect_enabled(true)?;
@@ -141,8 +136,7 @@ fn cleanup_status_and_logs<I2C,E>(rtc: &mut RV3028<I2C>) -> Result<(),E>
   rtc.enter_user_password(&BOGUS_PASSWORD)?;
 
   println!("Write protection enabled: {}", rtc.check_write_protect_enabled()?);
-
-
+  
   Ok(())
 
 }

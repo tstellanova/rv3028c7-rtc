@@ -445,6 +445,7 @@ impl<I2C, E> RV3028<I2C>
     }
     while self.is_eeprom_busy_raw()? {}
     self.toggle_auto_eeprom_refresh_raw(false)?;
+    while self.is_eeprom_busy_raw()? {}
     Ok(())
   }
 
@@ -460,21 +461,28 @@ impl<I2C, E> RV3028<I2C>
     res
   }
 
-  // // Read all of the EEPROM registers into their corresponding RAM mirrors
-  // fn eeprom_refresh_all(&mut self) -> Result<(), E> {
-  //   self.toggle_auto_eeprom_refresh_raw(true)?;
-  //   while self.is_eeprom_busy_raw()? {}
-  //
-  //   //  writing the command 00h into the register EECMD,
-  //   // and then the second command 12h into the register EECMD
-  //   // will start the copy of the configuration into the RAM mirror
-  //
-  //   self.write_register_raw(REG_EEPROM_EE_CMD, 0x00)?; // first cmd must be zero
-  //   let res = self.write_register_raw(REG_EEPROM_EE_CMD, 0x12); // refresh all
-  //   while self.is_eeprom_busy_raw()? {}
-  //   self.toggle_auto_eeprom_refresh_raw(false)?;
-  //   res
-  // }
+  /// Read all of the EEPROM registers into their corresponding RAM mirrors
+  pub fn restore_eeprom_settings(&mut self) -> Result<(), E> {
+    self.select_mux_channel()?;
+    self.eeprom_refresh_all()
+  }
+
+  // Read all of the EEPROM registers into their corresponding RAM mirrors
+  fn eeprom_refresh_all(&mut self) -> Result<(), E> {
+    self.toggle_auto_eeprom_refresh_raw(true)?;
+    while self.is_eeprom_busy_raw()? {}
+
+    //  writing the command 00h into the register EECMD,
+    // and then the second command 12h into the register EECMD
+    // will start the copy of the configuration into the RAM mirror
+
+    self.write_register_raw(REG_EEPROM_EE_CMD, 0x00)?; // first cmd must be zero
+    while self.is_eeprom_busy_raw()? {}
+    let res = self.write_register_raw(REG_EEPROM_EE_CMD, 0x12); // refresh all
+    while self.is_eeprom_busy_raw()? {}
+    self.toggle_auto_eeprom_refresh_raw(false)?;
+    res
+  }
 
   // Set specific bits in a register: "raw" means it skips the mux
   // all bits must be high that you wish to set
@@ -595,10 +603,18 @@ impl<I2C, E> RV3028<I2C>
     // into the EEPROM registers 31h to 34h
     // and value = 255 in the EEPWE register to enable password function.
 
+    // write the enable and password in one go
+    // let write_buf = [
+    //   if enable { 255 } else { 0},
+    //   pass[0], pass[1], pass[2], pass[3]
+    // ];
+    // self.i2c.write( REG_EEPROM_PASSWORD_ENABLE, &write_buf  )?;
+
     self.i2c.write(RV3028_ADDRESS,
                    &[REG_EEPROM_PASSWORD_0, pass[0], pass[1], pass[2], pass[3]])?;
 
     self.toggle_write_protect_enabled(enable)?;
+
     self.eeprom_update_all_raw()?;
     Ok(())
   }
@@ -614,8 +630,6 @@ impl<I2C, E> RV3028<I2C>
     let enabled = 0 != read_buf[0];
 
     let res: [u8; 4] = [read_buf[1], read_buf[2], read_buf[3], read_buf[4]];
-    // res[0..=3].copy_from_slice(&read_buf[1..=4]);
-
     Ok((enabled, res) )
   }
 
@@ -643,7 +657,6 @@ impl<I2C, E> RV3028<I2C>
   pub fn set_user_ram(&mut self, data: &[u8; 2]) -> Result<(), E> {
     self.select_mux_channel()?;
     let mut write_buf: [u8; 3] = [0x1F, 0,0]; // User RAM 1 register
-    // write_buf[1..3].copy_from_slice(data);
     write_buf[1..=2].copy_from_slice(data);
 
     self.i2c.write(RV3028_ADDRESS, &write_buf)?;

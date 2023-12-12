@@ -37,22 +37,46 @@ fn check_passwords_match<I2C,E>(rtc: &mut RV3028<I2C>) -> Result<(),E>
         // this is only readable if wp is unlocked
         let (_wp_enabled, ur_wp_pass) = rtc.get_write_protect_settings()?;
         println!("wp password in eeprom is: {:?} expect: {:?}", ur_wp_pass, LONG_CLOCK_PASSWORD);
-        if ur_wp_pass.ne(&LONG_CLOCK_PASSWORD) {
-            // set the user pass to be the same
-            rtc.enter_user_password(&ur_wp_pass)?;
-            //if ur_wp_pass.eq(&EVEN_LESS_ANCIENT_PASS) {
-                println!(">>> changing to LONG_CLOCK_PASSWORD");
-                rtc.set_write_protect_password(&LONG_CLOCK_PASSWORD, false)?;
-                let (_wp_enabled, new_wp_pass) = rtc.get_write_protect_settings()?;
-                println!("new_wp_pass is: {:?} expect: {:?}", new_wp_pass, LONG_CLOCK_PASSWORD);
-                rtc.enter_user_password(&LONG_CLOCK_PASSWORD)?;
-
-            //}
-        }
+        // if ur_wp_pass.ne(&LONG_CLOCK_PASSWORD) {
+            // // set the user pass to be the same
+            // rtc.enter_user_password(&ur_wp_pass)?;
+            // println!(">>> changing to LONG_CLOCK_PASSWORD");
+            // rtc.set_write_protect_password(&LONG_CLOCK_PASSWORD, false)?;
+            // let (_wp_enabled, new_wp_pass) = rtc.get_write_protect_settings()?;
+            // println!("new_wp_pass is: {:?} expect: {:?}", new_wp_pass, LONG_CLOCK_PASSWORD);
+            // rtc.enter_user_password(&LONG_CLOCK_PASSWORD)?;
+        // }
     }
     else {
         println!("Write protect disabled");
     }
+
+    Ok(())
+}
+
+fn setup_write_protection<I2C,E>(rtc: &mut RV3028<I2C>) -> Result<(),E>
+    where
+      I2C: Write<Error = E> + Read<Error = E> + WriteRead<Error = E>,
+      E: std::fmt::Debug
+{
+    rtc.restore_eeprom_settings()?;
+
+    let (wp_enabled, wp_pass) = rtc.get_write_protect_settings()?;
+    println!("eeprom wp_enabled: {} wp_pass: {:?}", wp_enabled, wp_pass);
+
+    if wp_enabled {
+        println!("EEPROM WP already enabled..skipping");
+        return Ok(())
+    }
+
+    println!("setting write protecct password...");
+    // the WP password is not set in eeprom -- set it now
+    rtc.enter_user_password(&LONG_CLOCK_PASSWORD)?;
+    rtc.set_write_protect_password(&LONG_CLOCK_PASSWORD, true)?;
+    // rtc.toggle_write_protect_enabled(true);
+
+    //verify the WP password is as expected
+    check_passwords_match(rtc)?;
 
     Ok(())
 }
@@ -162,6 +186,8 @@ fn main() -> Result<()> {
 
     // Create a new instance of the RV3028 driver
     let mut rtc = RV3028::new(i2c);
+
+    setup_write_protection(&mut rtc)?;
 
     // preemptively set the user password in case it has already been written to EEPROM
     check_passwords_match(&mut rtc)?;
