@@ -1,8 +1,8 @@
-extern crate rv3028c7_rtc;
-
 use std::convert::TryInto;
 use core::ops::Add;
+use core::cell::RefCell;
 use linux_embedded_hal::I2cdev;
+use embedded_hal_bus::i2c::RefCellDevice;
 use chrono::{NaiveDateTime, Timelike, Utc};
 use rv3028c7_rtc::RV3028;
 use std::time::{Duration };
@@ -58,11 +58,11 @@ fn main() {
 
   // Initialize the I2C bus (device)
   let i2c = I2cdev::new("/dev/i2c-1").expect("Failed to open I2C device");
-  let i2c_bus = shared_bus::BusManagerSimple::new(i2c);
+  let i2c_bus = RefCell::new(i2c);
 
   // Create two instances of the RV3028 driver
-  let mut rtc1 = RV3028::new_with_mux(i2c_bus.acquire_i2c(), MUX_I2C_ADDRESS, MUX_CHAN_FIRST);
-  let mut rtc2 = RV3028::new_with_mux(i2c_bus.acquire_i2c(), MUX_I2C_ADDRESS, MUX_CHAN_SECOND);
+  let mut rtc1 = RV3028::new_with_mux(RefCellDevice::new(&i2c_bus), MUX_I2C_ADDRESS, MUX_CHAN_FIRST);
+  let mut rtc2 = RV3028::new_with_mux(RefCellDevice::new(&i2c_bus), MUX_I2C_ADDRESS, MUX_CHAN_SECOND);
 
   // setting RTC times and rechecking sys time seems to take ~3800 micros with my equipment
   const IDEAL_DELAY_US_LOW: u32 = 1_000_000 - 3800;
@@ -86,7 +86,7 @@ fn main() {
     // setting RTC times and rechecking sys time seems to take ~3800 micros with my equipment
     println!("set time {} at {} ({} µs) ", next_dt, sys_dt, subsec);
     if subsec > 100 { continue 'session }
-    let sys_timestamp_start: u32 = sys_dt.timestamp().try_into().unwrap();
+    let sys_timestamp_start: u32 = sys_dt.and_utc().timestamp().try_into().unwrap();
 
     // check the drift over and over again
     loop {

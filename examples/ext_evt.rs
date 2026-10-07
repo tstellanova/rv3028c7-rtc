@@ -1,8 +1,6 @@
-extern crate rv3028c7_rtc;
-
 use linux_embedded_hal::I2cdev;
 use chrono::{Duration, Utc};
-use rv3028c7_rtc::{RV3028, EventTimeStampLogger, TS_EVENT_SOURCE_EVI};
+use rv3028c7_rtc::{RV3028, ChronoAccess, EventTimeStampLogger, TS_EVENT_SOURCE_EVI};
 use gpiocdev::{ Request, line::{Value} };
 
 // use linux_embedded_hal::{CdevPin, gpio_cdev::{Chip, LineRequestFlags}};

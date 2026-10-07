@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: test (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: default
+            features: ""
+          - name: no default features
+            features: --no-default-features
+          - name: jiff only
+            features: --no-default-features --features jiff
+          - name: all features
+            features: --all-features
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --lib ${{ matrix.features }}
+
+  feature-powerset:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-hack
+      - run: cargo hack check --lib --feature-powerset
+
+  no-std:
+    name: no_std (${{ matrix.target }}, ${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: thumbv7em-none-eabihf
+            name: all features
+            features: --all-features
+          - target: thumbv7em-none-eabihf
+            name: jiff only
+            features: --no-default-features --features jiff
+          # jiff needs atomic compare-and-swap, which Cortex-M0 lacks
+          # unless the application configures portable-atomic
+          - target: thumbv6m-none-eabi
+            name: default
+            features: ""
+          - target: thumbv6m-none-eabi
+            name: no default features
+            features: --no-default-features
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - run: cargo build --lib --target ${{ matrix.target }} ${{ matrix.features }}
+
+  examples:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo check --examples --all-features
+
+  docs:
+    runs-on: ubuntu-latest
+    env:
+      RUSTDOCFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo doc --no-deps --all-features
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      # reports warnings without failing, until the existing warnings are cleaned up
+      - run: cargo clippy --lib --tests --all-features
+
+  msrv:
+    name: MSRV (1.85)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.85"
+          targets: thumbv7em-none-eabihf
+      - run: cargo test --lib --all-features
+      - run: cargo build --lib --all-features --target thumbv7em-none-eabihf
