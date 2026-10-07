@@ -1,5 +1,3 @@
-extern crate rv3028c7_rtc;
-
 use std::ops::{Add};
 use linux_embedded_hal::I2cdev;
 use chrono::{Datelike, NaiveDateTime, Timelike, Utc, Weekday};
@@ -7,7 +5,7 @@ use rv3028c7_rtc::{RV3028};
 use std::time::Duration;
 use rtcc::DateTimeAccess;
 
-use embedded_hal::blocking::i2c::{Write, Read, WriteRead};
+use embedded_hal::i2c::I2c;
 // use direct linux gpio access using cdev rather than via constrained embedded_hal methods
 use gpiocdev::{ line::{EdgeDetection} };
 
@@ -27,12 +25,12 @@ fn get_sys_timestamp() -> (NaiveDateTime, u32) {
 }
 
 // run through a single iteration of alarm set, and verify the value is set
-fn verify_alarm_set<I2C,E>(rtc: &mut RV3028<I2C>, alarm_dt: &NaiveDateTime,
+fn verify_alarm_set<I2C>(rtc: &mut RV3028<I2C>, alarm_dt: &NaiveDateTime,
                            weekday: Option<Weekday>,
                            match_day: bool, match_hour: bool, match_minute: bool)
     where
-      I2C: Write<Error = E> + Read<Error = E> + WriteRead<Error = E>,
-      E: std::fmt::Debug
+      I2C: I2c,
+      I2C::Error: std::fmt::Debug,
 {
     rtc.set_alarm( &alarm_dt, weekday,
                    match_day, match_hour, match_minute).unwrap();

@@ -1,19 +1,17 @@
-extern crate rv3028c7_rtc;
-
 use std::ops::Add;
 use linux_embedded_hal::I2cdev;
 use chrono::{Duration, Utc};
 use rv3028c7_rtc::{RV3028};
 use rtcc::DateTimeAccess;
 
-use embedded_hal::blocking::i2c::{Write, Read, WriteRead};
+use embedded_hal::i2c::I2c;
 
 
 
-fn test_one_shot_duration<I2C,E>(rtc: &mut RV3028<I2C>, duration: &Duration) -> Result<Duration, E>
+fn test_one_shot_duration<I2C>(rtc: &mut RV3028<I2C>, duration: &Duration) -> Result<Duration, I2C::Error>
   where
-    I2C: Write<Error = E> + Read<Error = E> + WriteRead<Error = E>,
-    E: std::fmt::Debug
+    I2C: I2c,
+    I2C::Error: std::fmt::Debug,
 {
   rtc.clear_all_int_out_bits()?;
   rtc.toggle_countdown_timer(false)?;
@@ -60,10 +58,10 @@ fn test_one_shot_duration<I2C,E>(rtc: &mut RV3028<I2C>, duration: &Duration) -> 
   Ok(actual)
 }
 
-fn test_periodic_duration<I2C,E>(rtc: &mut RV3028<I2C>, duration: &Duration) -> Result<(), E>
+fn test_periodic_duration<I2C>(rtc: &mut RV3028<I2C>, duration: &Duration) -> Result<(), I2C::Error>
   where
-    I2C: Write<Error = E> + Read<Error = E> + WriteRead<Error = E>,
-    E: std::fmt::Debug
+    I2C: I2c,
+    I2C::Error: std::fmt::Debug,
 {
   rtc.clear_all_int_out_bits()?;
   rtc.toggle_countdown_timer(false)?;

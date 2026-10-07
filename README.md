@@ -9,6 +9,40 @@ downloaded November 2023.
 This driver provides many methods for reading and writing the i2c registers of the RTC,
 but it does not fully exercise all the features of the RTC. 
 
+The driver works with any I2C implementation of the [`embedded-hal`](https://crates.io/crates/embedded-hal)
+1.0 `I2c` trait. The minimum supported Rust version is 1.85.
+
+## Usage
+
+```rust
+use linux_embedded_hal::I2cdev;
+use rv3028c7_rtc::{DateTimeAccess, RV3028};
+
+let i2c = I2cdev::new("/dev/i2c-1").unwrap();
+let mut rtc = RV3028::new(i2c);
+
+let now = rtc.datetime().unwrap();
+```
+
+To talk to several devices on one bus (for example several RTCs behind an i2c mux),
+share the bus with [`embedded-hal-bus`](https://crates.io/crates/embedded-hal-bus):
+
+```rust
+use core::cell::RefCell;
+use embedded_hal_bus::i2c::RefCellDevice;
+
+let i2c_bus = RefCell::new(i2c);
+let mut rtc1 = RV3028::new_with_mux(RefCellDevice::new(&i2c_bus), 0x70, 0b0000_0001);
+let mut rtc2 = RV3028::new_with_mux(RefCellDevice::new(&i2c_bus), 0x70, 0b1000_0000);
+```
+
+### Upgrading from 0.5
+
+Version 0.6 moves from `embedded-hal` 0.2 to 1.0, so your HAL must provide an
+`embedded-hal` 1.0 I2C implementation. If you used `shared-bus`, switch to `embedded-hal-bus`
+as shown above. If you import `DateTimeAccess` from `rtcc` directly, use `rtcc` 0.4.
+See the [changelog](./CHANGELOG.md) for details.
+
 ## Running examples
 
 All of the examples have been run and tested on a raspberry pi running linux, 
@@ -29,6 +63,9 @@ Vbackup switchover
 - [`countdown`](./examples/countdown.rs) demonstrates setting the Periodic Countdown Timer for repeating and
 one-shot modes.
 - [`set_alarm`](./examples/set_alarm.rs) shows setting the alarm
+- [`countdown_int`](./examples/countdown_int.rs) shows the Periodic Countdown Timer triggering the INT pin
+- [`long_clock_setup`](./examples/long_clock_setup.rs) enables backup switchover and logs switchover events
+while watching the clock over a long period
 
 
 ### Multiple RTC examples
@@ -50,6 +87,12 @@ This will build and run _only_ the tests, on any host platform.
 These tests do not require a real hardware RTC to be connected to the host. 
 Note that plain `cargo test` currently also builds all examples,
 and if you're testing on a non-linux platform the `linux_embedded_hal`-based examples will fail to build. 
+
+To check that the examples compile from a non-linux host, build them for a linux target:
+```
+rustup target add aarch64-unknown-linux-gnu
+cargo check --examples --target aarch64-unknown-linux-gnu
+```
 
 
 

@@ -1,5 +1,3 @@
-extern crate rv3028c7_rtc;
-
 use std::ops::{Add};
 use linux_embedded_hal::I2cdev;
 use chrono::{Duration, NaiveDateTime, Timelike, Utc};

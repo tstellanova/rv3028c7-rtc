@@ -4,7 +4,8 @@
 pub use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Weekday};
 pub use rtcc::{  DateTimeAccess };
 
-use embedded_hal::blocking::i2c::{Write, Read, WriteRead};
+use chrono::DateTime;
+use embedded_hal::i2c::I2c;
 
 // Fixed i2c bus address of the device (7-bit)
 const RV3028_ADDRESS: u8 = 0xA4 >> 1;
@@ -250,9 +251,9 @@ pub struct RV3028<I2C> {
   mux_chan: u8,
 }
 
-impl<I2C, E> RV3028<I2C>
+impl<I2C> RV3028<I2C>
   where
-    I2C: Write<Error = E> + Read<Error = E> + WriteRead<Error = E>,
+    I2C: I2c,
 {
 
   /// New driver instance, assumes that there is no i2c mux
@@ -288,7 +289,7 @@ impl<I2C, E> RV3028<I2C>
   }
 
   // If using an i2c mux, tell the mux to select our channel
-  fn select_mux_channel(&mut self) -> Result<(), E> {
+  fn select_mux_channel(&mut self) -> Result<(), I2C::Error> {
     if self.mux_addr != 0u8 {
       self.i2c.write(self.mux_addr, &[self.mux_chan])
     }
@@ -297,21 +298,21 @@ impl<I2C, E> RV3028<I2C>
     }
   }
 
-  // fn write_register(&mut self, reg: u8, data: u8) -> Result<(), E> {
+  // fn write_register(&mut self, reg: u8, data: u8) -> Result<(), I2C::Error> {
   //   self.select_mux_channel()?;
   //   self.write_register_raw(reg, data)
   // }
 
-  fn write_register_raw(&mut self, reg: u8, data: u8) -> Result<(), E> {
+  fn write_register_raw(&mut self, reg: u8, data: u8) -> Result<(), I2C::Error> {
     self.i2c.write(RV3028_ADDRESS, &[reg, data])
   }
 
-  // fn read_register(&mut self, reg: u8) -> Result<u8, E> {
+  // fn read_register(&mut self, reg: u8) -> Result<u8, I2C::Error> {
   //   self.select_mux_channel()?;
   //   self.read_register_raw(reg)
   // }
 
-  fn read_register_raw(&mut self, reg: u8) -> Result<u8, E> {
+  fn read_register_raw(&mut self, reg: u8) -> Result<u8, I2C::Error> {
     let mut buf = [0];
     self.i2c.write_read(RV3028_ADDRESS, &[reg], &mut buf)?;
     Ok(buf[0])
@@ -325,7 +326,7 @@ impl<I2C, E> RV3028<I2C>
   /// and all registers must be (re)initialized.
   /// The flag value 1 is retained until a 0 is written by the user.
   /// At power up (POR) the value is set to 1, the user has to write 0 to the flag to use it.
-  pub fn check_and_clear_power_on_reset(&mut self) -> Result<bool, E>  {
+  pub fn check_and_clear_power_on_reset(&mut self) -> Result<bool, I2C::Error>  {
     let flag_set = 0 != self.check_and_clear_bits(
       REG_STATUS, RegStatusBits::PowerOnResetFlagBit as u8)?;
     Ok(flag_set)
@@ -333,31 +334,39 @@ impl<I2C, E> RV3028<I2C>
 
   /// Check whether an external event has been detected
   /// (an appropriate input signal on the EVI pin)
-  pub fn check_and_clear_ext_event(&mut self)-> Result<bool, E>  {
+  pub fn check_and_clear_ext_event(&mut self)-> Result<bool, I2C::Error>  {
     let flag_set = 0 != self.check_and_clear_bits(
       REG_STATUS, RegStatusBits::EventFlagBit as u8)?;
     Ok(flag_set)
   }
 
+  /// Check whether a switchover to the backup power supply has occurred
+  /// (the Backup Switch Flag, BSF)
+  pub fn check_and_clear_backup_event(&mut self) -> Result<bool, I2C::Error> {
+    let flag_set = 0 != self.check_and_clear_bits(
+      REG_STATUS, RegStatusBits::BackupSwitchFlag as u8)?;
+    Ok(flag_set)
+  }
+
   // TODO these methods have not been thoroughly tested, and are believed broken.
-  // fn is_eeprom_busy(&mut self) -> Result<bool, E> {
+  // fn is_eeprom_busy(&mut self) -> Result<bool, I2C::Error> {
   //   let status = self.read_register(REG_STATUS)?;
   //   Ok(status & EEBUSY_BIT != 0)
   // }
   //
-  // fn disable_auto_eeprom_refresh(&mut self) -> Result<(), E> {
+  // fn disable_auto_eeprom_refresh(&mut self) -> Result<(), I2C::Error> {
   //   let mut control_1 = self.read_register(REG_CONTROL1)?;
   //   control_1 |= EERD_BIT; // Set EERD bit
   //   self.write_register(REG_CONTROL1, control_1)
   // }
   //
-  // fn enable_auto_eeprom_refresh(&mut self) -> Result<(), E> {
+  // fn enable_auto_eeprom_refresh(&mut self) -> Result<(), I2C::Error> {
   //   let mut control_1 = self.read_register(REG_CONTROL1)?;
   //   control_1 &= !(EERD_BIT); // Clear EERD bit
   //   self.write_register(REG_CONTROL1, control_1)
   // }
   //
-  // pub fn eeprom_read(&mut self, address: u8) -> Result<u8, E> {
+  // pub fn eeprom_read(&mut self, address: u8) -> Result<u8, I2C::Error> {
   //   self.disable_auto_eeprom_refresh()?;
   //   while self.is_eeprom_busy()? {}
   //   // Read from EEPROM
@@ -367,7 +376,7 @@ impl<I2C, E> RV3028<I2C>
   //   res
   // }
   //
-  // pub fn eeprom_write(&mut self, address: u8, data: u8) -> Result<(), E> {
+  // pub fn eeprom_write(&mut self, address: u8, data: u8) -> Result<(), I2C::Error> {
   //   self.disable_auto_eeprom_refresh()?;
   //   while self.is_eeprom_busy()? {}
   //   self.write_register(EEPROM_ADDRESS, address)?;
@@ -379,14 +388,14 @@ impl<I2C, E> RV3028<I2C>
 
   // // set specific bits in a register:
   // // all bits must be high that you wish to set
-  // fn set_reg_bits(&mut self, reg: u8, bits: u8) -> Result<(), E> {
+  // fn set_reg_bits(&mut self, reg: u8, bits: u8) -> Result<(), I2C::Error> {
   //   self.select_mux_channel()?;
   //   self.set_reg_bits_raw(reg, bits)
   // }
 
   // Set specific bits in a register: "raw" means it skips the mux
   // all bits must be high that you wish to set
-  fn set_reg_bits_raw(&mut self, reg: u8, bits: u8) -> Result<(), E> {
+  fn set_reg_bits_raw(&mut self, reg: u8, bits: u8) -> Result<(), I2C::Error> {
     let mut reg_val = self.read_register_raw(reg)?;
     reg_val |= bits; // Set bits that are high
     self.write_register_raw(reg, reg_val)
@@ -394,14 +403,14 @@ impl<I2C, E> RV3028<I2C>
 
   // clear specific bits in a register:
   // all bits must be high that you wish to be cleared
-  // fn clear_reg_bits(&mut self, reg: u8, bits: u8) -> Result<(), E> {
+  // fn clear_reg_bits(&mut self, reg: u8, bits: u8) -> Result<(), I2C::Error> {
   //   self.select_mux_channel()?;
   //   self.clear_reg_bits_raw(reg,bits)
   // }
 
   // Clears specific bits in a register, skips the mux.
   // All bits must be high that you wish to be cleared
-  fn clear_reg_bits_raw(&mut self, reg: u8, bits: u8) -> Result<(), E> {
+  fn clear_reg_bits_raw(&mut self, reg: u8, bits: u8) -> Result<(), I2C::Error> {
     let mut reg_val = self.read_register_raw(reg)?;
     reg_val &= !(bits); // Clear  bits that are high
     self.write_register_raw(reg, reg_val)
@@ -413,7 +422,7 @@ impl<I2C, E> RV3028<I2C>
   /// Disabling also resets the `limit_resistance` to 3 kΩ, the factory default.
   /// Returns the status of trickle charging (true for enabled, false for disabled)
   pub fn toggle_trickle_charge(&mut self, enable: bool,
-                               limit_resistance: TrickleChargeCurrentLimiter) -> Result<bool, E>  {
+                               limit_resistance: TrickleChargeCurrentLimiter) -> Result<bool, I2C::Error>  {
     self.select_mux_channel()?;
 
     // First disable charging before changing settings
@@ -440,7 +449,7 @@ impl<I2C, E> RV3028<I2C>
   /// when Vdd supply level drops below useful level.
   /// - `enable` enables switching to Vbackup, disables if false
   /// Returns the set value
-  pub fn toggle_backup_switchover(&mut self, enable: bool) -> Result<bool, E> {
+  pub fn toggle_backup_switchover(&mut self, enable: bool) -> Result<bool, I2C::Error> {
     self.select_mux_channel()?;
     self.set_or_clear_reg_bits_raw(
       EEPROM_MIRROR_ADDRESS, RegEepromMirrorBits::BackupSwitchoverDsm as u8, enable)?;
@@ -451,7 +460,7 @@ impl<I2C, E> RV3028<I2C>
   }
 
   /// Disable all clock outputs triggered by interrupts
-  pub fn clear_all_int_clockout_bits(&mut self) -> Result<(), E> {
+  pub fn clear_all_int_clockout_bits(&mut self) -> Result<(), I2C::Error> {
     self.select_mux_channel()?;
     self.clear_reg_bits_raw(REG_CLOCK_INTERRUPT_MASK,
                             RegClockIntMaskBits::ClockoutOnExtEvtBit as u8 |
@@ -462,7 +471,7 @@ impl<I2C, E> RV3028<I2C>
 
 
   /// Get the current value of the EEPROM mirror from RAM
-  pub fn get_eeprom_mirror_value(&mut self) -> Result<u8, E> {
+  pub fn get_eeprom_mirror_value(&mut self) -> Result<u8, I2C::Error> {
     self.select_mux_channel()?;
     let reg_val = self.read_register_raw(EEPROM_MIRROR_ADDRESS)?;
     Ok(reg_val)
@@ -470,7 +479,7 @@ impl<I2C, E> RV3028<I2C>
 
   // Set the bcd time tracking registers
   // assumes `select_mux_channel` has already been called
-  fn set_time_raw(&mut self, time: &NaiveTime) -> Result<(), E> {
+  fn set_time_raw(&mut self, time: &NaiveTime) -> Result<(), I2C::Error> {
     let write_buf = [
       REG_SECONDS, // select the first register
       Self::bin_to_bcd(time.second() as u8 ),
@@ -484,7 +493,7 @@ impl<I2C, E> RV3028<I2C>
   // Set the internal BCD date registers.
   // Note that only years from 2000 to 2099 are supported.
   // Assumes `select_mux_channel` has already been called
-  fn set_date_raw(&mut self, date: &NaiveDate) -> Result<(), E> {
+  fn set_date_raw(&mut self, date: &NaiveDate) -> Result<(), I2C::Error> {
     let year = if date.year() > 2000 { (date.year() - 2000) as u8} else {0};
     let month = (date.month() % 13) as u8;
     let day = (date.day() % 32) as u8;
@@ -501,7 +510,7 @@ impl<I2C, E> RV3028<I2C>
   }
 
   /// Get the year, month, day from the internal BCD registers
-  pub fn get_ymd(&mut self) -> Result<(i32, u8, u8), E> {
+  pub fn get_ymd(&mut self) -> Result<(i32, u8, u8), I2C::Error> {
     let mut read_buf = [0u8;3];
     self.read_multi_registers(REG_DATE, &mut read_buf)?;
     let day = Self::bcd_to_bin(read_buf[0]);
@@ -512,7 +521,7 @@ impl<I2C, E> RV3028<I2C>
   }
 
   /// Get the hour, minute, second from the internal BCD registers
-  pub fn get_hms(&mut self) -> Result<(u8, u8, u8), E> {
+  pub fn get_hms(&mut self) -> Result<(u8, u8, u8), I2C::Error> {
     let mut read_buf = [0u8;3];
     self.read_multi_registers(REG_SECONDS, &mut read_buf)?;
     let seconds = Self::bcd_to_bin(read_buf[0]);
@@ -522,13 +531,13 @@ impl<I2C, E> RV3028<I2C>
   }
 
   // read a block of registers all at once
-  fn read_multi_registers(&mut self, reg: u8, read_buf: &mut [u8] )  -> Result<(), E> {
+  fn read_multi_registers(&mut self, reg: u8, read_buf: &mut [u8] )  -> Result<(), I2C::Error> {
     self.select_mux_channel()?;
     self.read_multi_registers_raw(reg, read_buf)
   }
 
   // read a block of registers all at once: skip mux
-  fn read_multi_registers_raw(&mut self, reg: u8, read_buf: &mut [u8] )  -> Result<(), E> {
+  fn read_multi_registers_raw(&mut self, reg: u8, read_buf: &mut [u8] )  -> Result<(), I2C::Error> {
     self.i2c.write_read(RV3028_ADDRESS, &[reg], read_buf)
   }
 
@@ -541,13 +550,13 @@ impl<I2C, E> RV3028<I2C>
   /// - This does not reset the prescaler pipeline,
   /// which means subseconds are not reset to zero.
   ///
-  pub fn set_unix_time(&mut self, unix_time: u32) -> Result<(), E> {
+  pub fn set_unix_time(&mut self, unix_time: u32) -> Result<(), I2C::Error> {
     self.select_mux_channel()?;
     self.set_unix_time_raw(unix_time)
   }
 
   // sets the unix time counter but skips the mux
-  fn set_unix_time_raw(&mut self, unix_time: u32) -> Result<(), E> {
+  fn set_unix_time_raw(&mut self, unix_time: u32) -> Result<(), I2C::Error> {
     let bytes = unix_time.to_le_bytes(); // Convert to little-endian byte array
     self.i2c.write(RV3028_ADDRESS, &[REG_UNIX_TIME_0, bytes[0], bytes[1], bytes[2], bytes[3]])
   }
@@ -560,7 +569,7 @@ impl<I2C, E> RV3028<I2C>
   /// which defers the "Year 2038 problem" until about the year 2106.
   /// - Note that the RTC's automatic leap year correction is only valid until 2099
   /// See the App Manual section "3.10. UNIX TIME REGISTERS"
-  pub fn get_unix_time(&mut self) -> Result<u32, E> {
+  pub fn get_unix_time(&mut self) -> Result<u32, I2C::Error> {
     let mut read_buf = [0u8; 4];
     self.read_multi_registers(REG_UNIX_TIME_0, &mut read_buf)?;
     let val = u32::from_le_bytes(read_buf);
@@ -570,7 +579,7 @@ impl<I2C, E> RV3028<I2C>
   /// The vendor application manual suggest we read the unix time twice,
   /// in case an internal increment or timestamp set is interspersed between the multi-byte read.
   /// This method performs the recommended read-twice.
-  pub fn get_unix_time_blocking(&mut self) -> Result<u32, E> {
+  pub fn get_unix_time_blocking(&mut self) -> Result<u32, I2C::Error> {
     loop {
       let val1 = self.get_unix_time()?;
       let val2 = self.get_unix_time()?;
@@ -582,18 +591,18 @@ impl<I2C, E> RV3028<I2C>
   }
 
   /// Toggle whether EVI events trigger on high/rising or low/falling edges
-  pub fn toggle_event_high_low(&mut self, high: bool) -> Result<(), E> {
+  pub fn toggle_event_high_low(&mut self, high: bool) -> Result<(), I2C::Error> {
     self.set_or_clear_reg_bits(REG_EVENT_CONTROL, RegEventControlBits::EventHighLowBit as u8, high)
   }
 
   /// Enable INT pin output when alarm occurs
-  pub fn toggle_alarm_int_enable(&mut self, enable: bool) -> Result<(), E> {
+  pub fn toggle_alarm_int_enable(&mut self, enable: bool) -> Result<(), I2C::Error> {
     self.set_or_clear_reg_bits(REG_CONTROL2, RegControl2Bits::AlarmIntEnableBit as u8, enable)
   }
 
   /// Toggle whether the RTC outputs a pulse (active low) on INT pin,
   /// when the countdown timer expires.
-  pub fn toggle_countdown_int_enable(&mut self, enable: bool) -> Result<(), E> {
+  pub fn toggle_countdown_int_enable(&mut self, enable: bool) -> Result<(), I2C::Error> {
     self.set_or_clear_reg_bits(REG_CONTROL2, RegControl2Bits::TimerIntEnableBit as u8, enable)
   }
 
@@ -602,18 +611,18 @@ impl<I2C, E> RV3028<I2C>
   /// - or when an Automatic Backup Switchover occurs and TSS = 1.
   /// The signal on the INT pin is retained until the EVF flag is cleared
   /// to 0 (no automatic cancellation)
-  pub fn toggle_ext_event_int_enable(&mut self, enable: bool) -> Result<(), E> {
+  pub fn toggle_ext_event_int_enable(&mut self, enable: bool) -> Result<(), I2C::Error> {
     self.set_or_clear_reg_bits(REG_CONTROL2, RegControl2Bits::EventIntEnableBit as u8, enable)
   }
 
   /// Toggles whether an interrupt signal is generated on the INT pin:
   /// - when the time updates at either 1 second or 1 minute intervals
-  pub fn toggle_time_up_int_enable(&mut self, enable: bool) -> Result<(), E> {
+  pub fn toggle_time_up_int_enable(&mut self, enable: bool) -> Result<(), I2C::Error> {
     self.set_or_clear_reg_bits(REG_CONTROL2, RegControl2Bits::TimeUpdateIntEnableBit as u8, enable)
   }
 
   /// Disable all INT pin output selector bits in RAM, excludes PORIE
-  pub fn clear_all_int_out_bits(&mut self) -> Result<(), E> {
+  pub fn clear_all_int_out_bits(&mut self) -> Result<(), I2C::Error> {
     self.select_mux_channel()?;
     // UIE, TIE, AIE,  EIE
     self.clear_reg_bits_raw(REG_CONTROL2,
@@ -632,7 +641,7 @@ impl<I2C, E> RV3028<I2C>
 
   /// Clear all of the status registers that indicate whether
   /// various conditions have triggered
-  pub fn clear_all_status_flags(&mut self) -> Result<(), E> {
+  pub fn clear_all_status_flags(&mut self) -> Result<(), I2C::Error> {
     self.select_mux_channel()?;
     self.clear_reg_bits_raw(REG_STATUS,
                             RegStatusBits::ClockIntFlagBit  as u8 |
@@ -647,7 +656,7 @@ impl<I2C, E> RV3028<I2C>
   }
 
   /// - `int_enable` enables INT output on the periodic time updates
-  pub fn configure_periodic_time_update(&mut self, minutes: bool, int_enable: bool) -> Result<(), E> {
+  pub fn configure_periodic_time_update(&mut self, minutes: bool, int_enable: bool) -> Result<(), I2C::Error> {
     self.select_mux_channel()?;
 
     // 1. Initialize bits UIE and UF to 0.
@@ -676,7 +685,7 @@ impl<I2C, E> RV3028<I2C>
 
   /// Check the alarm status, and if it's triggered, clear it
   /// return bool indicating whether the alarm triggered
-  pub fn check_and_clear_alarm(&mut self) -> Result<bool, E> {
+  pub fn check_and_clear_alarm(&mut self) -> Result<bool, I2C::Error> {
     // Check if the AF flag is set
     let alarm_flag_set = 0 != self.check_and_clear_bits(
       REG_STATUS, RegStatusBits::AlarmFlagBit as u8)?;
@@ -691,7 +700,7 @@ impl<I2C, E> RV3028<I2C>
   /// - `match_hour` indicates whether the hour should be matched for the alarm
   /// - `match_minute` indicates whether the minutes should be matched for the alarm
   pub fn set_alarm(&mut self, datetime: &NaiveDateTime,
-                   weekday: Option<Weekday>, match_day: bool, match_hour: bool, match_minute: bool) -> Result<(), E> {
+                   weekday: Option<Weekday>, match_day: bool, match_hour: bool, match_minute: bool) -> Result<(), I2C::Error> {
 
     self.select_mux_channel()?;
     // Initialize AF to 0; AIE/AlarmIntEnableBit is managed independently
@@ -743,7 +752,7 @@ impl<I2C, E> RV3028<I2C>
   /// Matches are flag settings for whether the alarm should match day, hour, minute
   ///
   pub fn get_alarm_datetime_wday_matches(&mut self)
-    -> Result<(NaiveDateTime, Option<Weekday>, bool, bool, bool), E> {
+    -> Result<(NaiveDateTime, Option<Weekday>, bool, bool, bool), I2C::Error> {
 
     self.select_mux_channel()?;
 
@@ -767,12 +776,12 @@ impl<I2C, E> RV3028<I2C>
       if 0 == wada_state {
         // weekday alarm
         weekday = Some(Weekday::try_from(day).unwrap());
-        NaiveDateTime::UNIX_EPOCH.with_hour(hour as u32).unwrap()
+        DateTime::UNIX_EPOCH.naive_utc().with_hour(hour as u32).unwrap()
           .with_minute(minutes as u32).unwrap()
       }
       else {
         // date alarm
-        NaiveDateTime::UNIX_EPOCH.with_day(day as u32).unwrap()
+        DateTime::UNIX_EPOCH.naive_utc().with_day(day as u32).unwrap()
           .with_hour(hour as u32).unwrap()
           .with_minute(minutes as u32).unwrap()
       };
@@ -783,12 +792,12 @@ impl<I2C, E> RV3028<I2C>
 
 
   // If `set` is true, set the high bits given in `bits`, otherwise clear those bits
-  fn set_or_clear_reg_bits(&mut self, reg: u8, bits: u8, set: bool) -> Result<(), E> {
+  fn set_or_clear_reg_bits(&mut self, reg: u8, bits: u8, set: bool) -> Result<(), I2C::Error> {
     self.select_mux_channel()?;
     self.set_or_clear_reg_bits_raw(reg, bits, set)
   }
 
-  fn set_or_clear_reg_bits_raw(&mut self, reg: u8, bits: u8, set: bool) -> Result<(), E> {
+  fn set_or_clear_reg_bits_raw(&mut self, reg: u8, bits: u8, set: bool) -> Result<(), I2C::Error> {
     if set {
       self.set_reg_bits_raw(reg, bits)
     }
@@ -799,7 +808,7 @@ impl<I2C, E> RV3028<I2C>
 
 
   /// Enables or disables default CLKOUT behavior
-  pub fn toggle_plain_clockout(&mut self, enable: bool) -> Result<(), E> {
+  pub fn toggle_plain_clockout(&mut self, enable: bool) -> Result<(), I2C::Error> {
     self.select_mux_channel()?;
     // TODO self.clear_reg_bits_raw(REG_STATUS, RegStatusBits::ClockIntFlagBit as u8)?;
     self.set_or_clear_reg_bits_raw(
@@ -807,14 +816,14 @@ impl<I2C, E> RV3028<I2C>
   }
 
   /// Enables or disables interrupt-controlled CLKOUT
-  pub fn toggle_int_clockout(&mut self, enable: bool)  -> Result<(), E> {
+  pub fn toggle_int_clockout(&mut self, enable: bool)  -> Result<(), I2C::Error> {
     self.select_mux_channel()?;
     self.set_or_clear_reg_bits_raw(
     REG_CONTROL2,  RegControl2Bits::ClockoutIntEnableBit as u8, enable)
   }
 
   // Configure the Periodic Countdown Timer prior to the next countdown.
-  fn config_pct_raw(&mut self, value: u16, freq: TimerClockFreq, repeat: bool ) -> Result<(), E> {
+  fn config_pct_raw(&mut self, value: u16, freq: TimerClockFreq, repeat: bool ) -> Result<(), I2C::Error> {
     let value_high: u8 = ((value >> 8) as u8) & 0x0F;
     let value_low: u8 = (value & 0xFF) as u8;
 
@@ -890,7 +899,7 @@ impl<I2C, E> RV3028<I2C>
   /// - `start`: If true, start the countdown
   pub fn config_countdown_timer(&mut self, duration: &Duration,
                                 repeat: bool, start: bool
-  ) -> Result<Duration, E> {
+  ) -> Result<Duration, I2C::Error> {
     let (ticks, freq, estimated) =
       Self::pct_ticks_and_rate_for_duration(duration);
 
@@ -905,13 +914,13 @@ impl<I2C, E> RV3028<I2C>
 
   /// Set whether the Periodic Countdown Timer mode is repeating (periodic) or one-shot.
   /// - `enable`: If true, starts the timer countdown. If false, stops the timer.
-  pub fn toggle_countdown_timer(&mut self, enable: bool)  -> Result<(), E> {
+  pub fn toggle_countdown_timer(&mut self, enable: bool)  -> Result<(), I2C::Error> {
     self.set_or_clear_reg_bits(
       REG_CONTROL1, RegControl1Bits::TimerEnableBit as u8, enable)
   }
 
   /// Check whether countdown timer has finished counting down, and clear it
-  pub fn check_and_clear_countdown(&mut self) -> Result<bool, E> {
+  pub fn check_and_clear_countdown(&mut self) -> Result<bool, I2C::Error> {
     let flag_set = 0 != self.check_and_clear_bits(
       REG_STATUS, RegStatusBits::PeriodicTimerFlag as u8)?;
     Ok(flag_set)
@@ -920,7 +929,7 @@ impl<I2C, E> RV3028<I2C>
   /// Read the current value of the Periodic Countdown Timer,
   /// which is only valid after the timer has been enabled.
   /// The meaning of the value depends on the configured TimerClockFreq
-  pub fn get_countdown_value(&mut self) -> Result<u16, E> {
+  pub fn get_countdown_value(&mut self) -> Result<u16, I2C::Error> {
     let mut read_buf = [0u8;2];
     self.read_multi_registers(REG_TIMER_STATUS0, &mut read_buf)?;
     let value = ((read_buf[1] as u16) << 8) | (read_buf[0] as u16);
@@ -928,7 +937,7 @@ impl<I2C, E> RV3028<I2C>
   }
 
   // check and clear a flag
-  fn check_and_clear_bits(&mut self, reg: u8, bits: u8) -> Result<u8, E> {
+  fn check_and_clear_bits(&mut self, reg: u8, bits: u8) -> Result<u8, I2C::Error> {
     self.select_mux_channel()?;
     let reg_val = self.read_register_raw(reg)?;
     let bits_val =  reg_val & bits;
@@ -944,7 +953,7 @@ impl<I2C, E> RV3028<I2C>
   /// - `int_enable` whether events detected on EVI pin should generate an interrupt on INT pin
   /// - `filtering` 00..11 time filtering
   pub fn config_ext_event_detection(
-    &mut self, rising: bool, int_enable: bool, filtering: u8, clockout_enable: bool) -> Result<(), E>
+    &mut self, rising: bool, int_enable: bool, filtering: u8, clockout_enable: bool) -> Result<(), I2C::Error>
   {
     self.select_mux_channel()?;
 
@@ -1023,11 +1032,11 @@ pub trait EventTimeStampLogger {
   fn set_event_timestamp_source(&mut self, source: u8) -> Result<(), Self::Error>;
 }
 
-impl<I2C, E> DateTimeAccess for  RV3028<I2C>
+impl<I2C> DateTimeAccess for  RV3028<I2C>
   where
-    I2C: Write<Error = E> + Read<Error = E> + WriteRead<Error = E>,
+    I2C: I2c,
 {
-  type Error = E;
+  type Error = I2C::Error;
 
   /// This particular RTC's timestamps wrap at 0xFFFF_FFFF, around the year 2106.
   /// It doesn't support:
@@ -1035,7 +1044,7 @@ impl<I2C, E> DateTimeAccess for  RV3028<I2C>
   /// - leap year calculations past 2099
   fn datetime(&mut self) -> Result<NaiveDateTime, Self::Error> {
     let unix_timestamp = self.get_unix_time()?;
-    Ok(NaiveDateTime::from_timestamp_opt(unix_timestamp.into(), 0).unwrap())
+    Ok(DateTime::from_timestamp(unix_timestamp.into(), 0).unwrap().naive_utc())
   }
 
   /// This implementation assumes (but doesn't verify)
@@ -1046,7 +1055,7 @@ impl<I2C, E> DateTimeAccess for  RV3028<I2C>
   /// subsecond counters are zeroed, when it writes to the Seconds register.
   /// This assists with clock synchronization with external clocks.
   fn set_datetime(&mut self, datetime: &NaiveDateTime) -> Result<(), Self::Error> {
-    let unix_timestamp: u32 = datetime.timestamp().try_into().unwrap();
+    let unix_timestamp: u32 = datetime.and_utc().timestamp().try_into().unwrap();
     self.select_mux_channel()?;
     // unix timestamp counter is stored in registers separate from everything else:
     // this method tries to align both, because the unix timestamp is not
@@ -1060,11 +1069,11 @@ impl<I2C, E> DateTimeAccess for  RV3028<I2C>
   }
 
 }
-impl<I2C, E> EventTimeStampLogger for  RV3028<I2C>
+impl<I2C> EventTimeStampLogger for  RV3028<I2C>
   where
-    I2C: Write<Error = E> + Read<Error = E> + WriteRead<Error = E>
+    I2C: I2c,
 {
-  type Error = E;
+  type Error = I2C::Error;
 
 
   fn toggle_timestamp_logging(&mut self, enable: bool) -> Result<(), Self::Error> {
@@ -1080,7 +1089,7 @@ impl<I2C, E> EventTimeStampLogger for  RV3028<I2C>
   }
 
   fn config_timestamp_logging(
-    &mut self, evt_source: u8, overwrite: bool,  start:bool) -> Result<(), E>
+    &mut self, evt_source: u8, overwrite: bool,  start:bool) -> Result<(), Self::Error>
   {
     self.select_mux_channel()?;
 
@@ -1169,7 +1178,7 @@ impl<I2C, E> EventTimeStampLogger for  RV3028<I2C>
 #[cfg(test)]
 mod tests {
   use super::*;
-  use embedded_hal_mock::i2c::{Mock as I2cMock, Transaction as I2cTrans};
+  use embedded_hal_mock::eh1::i2c::{Mock as I2cMock, Transaction as I2cTrans};
   use std::vec;
 
 
@@ -1195,6 +1204,7 @@ mod tests {
     let mock = I2cMock::new(&expectations);
     let mut rv3028 = RV3028::new(mock);
     rv3028.set_unix_time(unix_time).unwrap();
+    rv3028.i2c.done();
   }
 
   #[test]
@@ -1215,7 +1225,8 @@ mod tests {
     ];
     let mock = I2cMock::new(&expectations);
     let mut rv3028 = RV3028::new(mock);
-    assert_eq!(rv3028.get_unix_time().unwrap(), unix_time);
+    assert_eq!(rv3028.get_unix_time_blocking().unwrap(), unix_time);
+    rv3028.i2c.done();
   }
 
   // The duration requested should exactly match the duration the RTC can deliver with
