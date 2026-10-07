@@ -1,8 +1,6 @@
-extern crate rv3028c7_rtc;
-
 use linux_embedded_hal::I2cdev;
 use chrono::{Datelike, NaiveDateTime, Timelike, Utc};
-use rv3028c7_rtc::{EventTimeStampLogger, RV3028, TS_EVENT_SOURCE_BSF};
+use rv3028c7_rtc::{ChronoAccess, EventTimeStampLogger, RV3028, TS_EVENT_SOURCE_BSF};
 use std::time::Duration;
 use std::thread::sleep;
 use rtcc::DateTimeAccess;

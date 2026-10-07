@@ -1,13 +1,13 @@
-extern crate rv3028c7_rtc;
-
 use core::ops::Add;
+use core::cell::RefCell;
 use linux_embedded_hal::I2cdev;
+use embedded_hal_bus::i2c::RefCellDevice;
 use chrono::{NaiveDateTime, Timelike, Utc};
 use rv3028c7_rtc::{RV3028, DateTimeAccess};
 use std::time::{Duration };
 use std::thread::sleep;
 use ds323x::Ds323x;
-use embedded_hal::blocking::i2c::Write;
+use embedded_hal::i2c::I2c;
 
 /**
 Example comparing set/get of date and time for two different models of RTC,
@@ -66,17 +66,17 @@ fn main() {
 
     // Initialize the I2C bus (device)
     let i2c = I2cdev::new("/dev/i2c-1").expect("Failed to open I2C device");
-    let i2c_bus = shared_bus::BusManagerSimple::new(i2c);
+    let i2c_bus = RefCell::new(i2c);
 
-    let mut muxdev = i2c_bus.acquire_i2c();
+    let mut muxdev = RefCellDevice::new(&i2c_bus);
 
     // Create two instances of the DS3231 driver
-    let mut ds1 = Ds323x::new_ds3231(i2c_bus.acquire_i2c());
-    let mut ds2 = Ds323x::new_ds3231(i2c_bus.acquire_i2c());
+    let mut ds1 = Ds323x::new_ds3231(RefCellDevice::new(&i2c_bus));
+    let mut ds2 = Ds323x::new_ds3231(RefCellDevice::new(&i2c_bus));
 
     // Create two instances of the RV3028 driver
-    let mut rv1 = RV3028::new_with_mux(i2c_bus.acquire_i2c(), MUX_I2C_ADDRESS, MUX_CHAN_ZERO);
-    let mut rv2 = RV3028::new_with_mux(i2c_bus.acquire_i2c(), MUX_I2C_ADDRESS, MUX_CHAN_SEVEN);
+    let mut rv1 = RV3028::new_with_mux(RefCellDevice::new(&i2c_bus), MUX_I2C_ADDRESS, MUX_CHAN_ZERO);
+    let mut rv2 = RV3028::new_with_mux(RefCellDevice::new(&i2c_bus), MUX_I2C_ADDRESS, MUX_CHAN_SEVEN);
 
     'session: loop {
         // get the host system timestamp and synchronize that onto all RTCs
@@ -103,20 +103,20 @@ fn main() {
         // setting RTC times and rechecking sys time seems to take ~3800 micros with my equipment
         println!("set time {} at {} ({} µs) ", next_dt, sys_dt, subsec);
         if subsec > IDEAL_HALF_DELAY_US { continue 'session }
-        let sys_timestamp_start  = sys_dt.timestamp();
+        let sys_timestamp_start  = sys_dt.and_utc().timestamp();
 
 
         // Read timestamps from all RTCs over and over again,
         // until we detect they are mismatched, which indicates clock drift.
         // Note that we read back from the clocks in the same order we wrote to them.
         loop {
-            let rv1_out = rv1.datetime().unwrap().timestamp();
+            let rv1_out = rv1.datetime().unwrap().and_utc().timestamp();
             muxdev.write(MUX_I2C_ADDRESS, &[MUX_CHAN_TWO]).expect("mux ch2 i2c err");
-            let ds1_out = ds1.datetime().unwrap().timestamp();
+            let ds1_out = ds1.datetime().unwrap().and_utc().timestamp();
 
-            let rv2_out = rv2.datetime().unwrap().timestamp();
+            let rv2_out = rv2.datetime().unwrap().and_utc().timestamp();
             muxdev.write(MUX_I2C_ADDRESS, &[MUX_CHAN_FOUR]).expect("mux ch4 i2c err");
-            let ds2_out = ds2.datetime().unwrap().timestamp();
+            let ds2_out = ds2.datetime().unwrap().and_utc().timestamp();
 
             let (sys_timestamp, subsec_micros) = get_sys_timestamp_and_micros();
 

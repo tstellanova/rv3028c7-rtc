@@ -1,6 +1,6 @@
-extern crate rv3028c7_rtc;
-
+use core::cell::RefCell;
 use linux_embedded_hal::I2cdev;
+use embedded_hal_bus::i2c::RefCellDevice;
 use chrono::{Utc};
 use rv3028c7_rtc::{RV3028, TrickleChargeCurrentLimiter};
 use rtcc::DateTimeAccess;
@@ -30,11 +30,11 @@ const MUX_CHAN_SECOND:u8 = 0b1000_0000 ; // channel 7, MSB
 fn main() {
     // Initialize the I2C bus (device)
     let i2c = I2cdev::new("/dev/i2c-1").expect("Failed to open I2C device");
-    let i2c_bus = shared_bus::BusManagerSimple::new(i2c);
+    let i2c_bus = RefCell::new(i2c);
 
     // Create two instances of the RV3028 driver
-    let mut rtc1 = RV3028::new_with_mux(i2c_bus.acquire_i2c(), MUX_I2C_ADDRESS, MUX_CHAN_FIRST);
-    let mut rtc2 = RV3028::new_with_mux(i2c_bus.acquire_i2c(), MUX_I2C_ADDRESS, MUX_CHAN_SECOND);
+    let mut rtc1 = RV3028::new_with_mux(RefCellDevice::new(&i2c_bus), MUX_I2C_ADDRESS, MUX_CHAN_FIRST);
+    let mut rtc2 = RV3028::new_with_mux(RefCellDevice::new(&i2c_bus), MUX_I2C_ADDRESS, MUX_CHAN_SECOND);
 
     let dt1 = rtc1.datetime().unwrap();
     let dt2 = rtc2.datetime().unwrap();

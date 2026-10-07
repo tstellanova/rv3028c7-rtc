@@ -1,5 +1,3 @@
-extern crate rv3028c7_rtc;
-
 use std::ops::{Add};
 use linux_embedded_hal::I2cdev;
 use chrono::{Duration, NaiveDateTime, Timelike, Utc};
@@ -64,7 +62,7 @@ fn main() {
     rtc.toggle_countdown_timer(false).unwrap();
     let _ = rtc.check_and_clear_countdown();
 
-    let test_duration = Duration::milliseconds(1500);
+    let test_duration = std::time::Duration::from_millis(1500);
     let _estimated_duration = rtc.config_countdown_timer(&test_duration, true, false).unwrap();
 
     let init_dt = rtc.datetime().unwrap();
@@ -105,7 +103,7 @@ fn main() {
             dump_gpio_events(&gpio_int_req);
             let ptc_af = rtc.check_and_clear_countdown().unwrap();
             let delta  = cur_dt - start_time;
-            println!("{} ptc_af: {} delta: {} expected: {}", cur_dt, ptc_af, delta, test_duration);
+            println!("{} ptc_af: {} delta: {} expected: {:?}", cur_dt, ptc_af, delta, test_duration);
             println!("break on gpio_events");
             break;
         }
